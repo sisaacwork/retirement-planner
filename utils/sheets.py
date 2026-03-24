@@ -51,16 +51,36 @@ def get_spreadsheet():
         st.stop()
 
 
+@st.cache_resource
+def _worksheet_cache() -> dict:
+    """
+    In-memory cache of gspread Worksheet objects keyed by title.
+    Using @st.cache_resource means this dict persists for the lifetime of the
+    server process, so each worksheet is only looked up from the Sheets API once
+    rather than on every page load — avoiding 429 rate-limit errors.
+    """
+    return {}
+
+
 def get_or_create_worksheet(spreadsheet, title: str, headers: list[str]):
-    """Return a worksheet, creating it with headers if it doesn't exist."""
+    """
+    Return a worksheet, creating it with headers if it doesn't exist.
+    Results are cached in memory to avoid repeated fetch_sheet_metadata API calls.
+    """
+    cache = _worksheet_cache()
+    if title in cache:
+        return cache[title]
+
     try:
         ws = spreadsheet.worksheet(title)
-        # If empty, write headers
+        # If the sheet is completely empty, write the header row
         if ws.row_count == 0 or not ws.get_all_values():
             ws.append_row(headers)
     except gspread.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=title, rows=1000, cols=len(headers))
         ws.append_row(headers)
+
+    cache[title] = ws
     return ws
 
 
@@ -97,7 +117,7 @@ def _read_df(ws) -> pd.DataFrame:
 
 # ─── Contributions ────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 def get_contributions() -> pd.DataFrame:
     ss = get_spreadsheet()
     ws = get_or_create_worksheet(ss, SHEET_CONTRIBUTIONS, CONTRIBUTIONS_COLS)
@@ -143,7 +163,7 @@ def delete_contribution(row_id: str):
 
 # ─── Returns ─────────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 def get_returns() -> pd.DataFrame:
     ss = get_spreadsheet()
     ws = get_or_create_worksheet(ss, SHEET_RETURNS, RETURNS_COLS)
@@ -189,7 +209,7 @@ def delete_return(row_id: str):
 
 # ─── Balance Snapshots ────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 def get_snapshots() -> pd.DataFrame:
     ss = get_spreadsheet()
     ws = get_or_create_worksheet(ss, SHEET_SNAPSHOTS, SNAPSHOTS_COLS)
@@ -236,7 +256,7 @@ def delete_snapshot(row_id: str):
 
 # ─── Withdrawals ──────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 def get_withdrawals() -> pd.DataFrame:
     ss = get_spreadsheet()
     ws = get_or_create_worksheet(ss, SHEET_WITHDRAWALS, WITHDRAWALS_COLS)
@@ -268,7 +288,7 @@ def delete_withdrawal(row_id: str):
 
 # ─── Settings ────────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_settings() -> dict:
     ss = get_spreadsheet()
     ws = get_or_create_worksheet(ss, SHEET_SETTINGS, SETTINGS_COLS)
@@ -290,7 +310,7 @@ def get_settings() -> dict:
 
 def update_setting(key: str, value):
     ss = get_spreadsheet()
-    ws = ss.worksheet(SHEET_SETTINGS)
+    ws = get_or_create_worksheet(ss, SHEET_SETTINGS, SETTINGS_COLS)
     try:
         cell = ws.find(key)
         ws.update_cell(cell.row, 2, str(value))

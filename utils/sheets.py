@@ -27,9 +27,11 @@ SCOPES = [
 @st.cache_resource
 def get_client():
     """Authenticate and return a gspread client (cached for the session)."""
-    creds = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"], scopes=SCOPES
-    )
+    # Streamlit Cloud stores the private key with literal \n text instead of
+    # real newlines — this converts them back so Google's library can read the key.
+    info = dict(st.secrets["gcp_service_account"])
+    info["private_key"] = info["private_key"].replace("\\n", "\n")
+    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return gspread.authorize(creds)
 
 

@@ -99,10 +99,10 @@ def _read_df(ws) -> pd.DataFrame:
 @st.cache_data(ttl=30)
 def get_contributions() -> pd.DataFrame:
     ss = get_spreadsheet()
-    ws = ss.worksheet(SHEET_CONTRIBUTIONS)
+    ws = get_or_create_worksheet(ss, SHEET_CONTRIBUTIONS, CONTRIBUTIONS_COLS)
     df = _read_df(ws)
     if df.empty:
-        return df
+        return pd.DataFrame(columns=CONTRIBUTIONS_COLS)
     df["date"]   = pd.to_datetime(df["date"])
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
     return df.sort_values("date").reset_index(drop=True)
@@ -111,7 +111,7 @@ def get_contributions() -> pd.DataFrame:
 def add_contribution(contribution_date: date, amount: float, account: str,
                      person: str, notes: str = ""):
     ss = get_spreadsheet()
-    ws = ss.worksheet(SHEET_CONTRIBUTIONS)
+    ws = get_or_create_worksheet(ss, SHEET_CONTRIBUTIONS, CONTRIBUTIONS_COLS)
     row_id = str(uuid.uuid4())[:8]
     ws.append_row([row_id, str(contribution_date), amount, account, person, notes])
     st.cache_data.clear()
@@ -119,7 +119,7 @@ def add_contribution(contribution_date: date, amount: float, account: str,
 
 def delete_contribution(row_id: str):
     ss = get_spreadsheet()
-    ws = ss.worksheet(SHEET_CONTRIBUTIONS)
+    ws = get_or_create_worksheet(ss, SHEET_CONTRIBUTIONS, CONTRIBUTIONS_COLS)
     cell = ws.find(row_id)
     if cell:
         ws.delete_rows(cell.row)
@@ -131,10 +131,10 @@ def delete_contribution(row_id: str):
 @st.cache_data(ttl=30)
 def get_returns() -> pd.DataFrame:
     ss = get_spreadsheet()
-    ws = ss.worksheet(SHEET_RETURNS)
+    ws = get_or_create_worksheet(ss, SHEET_RETURNS, RETURNS_COLS)
     df = _read_df(ws)
     if df.empty:
-        return df
+        return pd.DataFrame(columns=RETURNS_COLS)
     df["date"]   = pd.to_datetime(df["date"])
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
     return df.sort_values("date").reset_index(drop=True)
@@ -143,7 +143,7 @@ def get_returns() -> pd.DataFrame:
 def add_return(return_date: date, amount: float, account: str,
                person: str, notes: str = ""):
     ss = get_spreadsheet()
-    ws = ss.worksheet(SHEET_RETURNS)
+    ws = get_or_create_worksheet(ss, SHEET_RETURNS, RETURNS_COLS)
     row_id = str(uuid.uuid4())[:8]
     ws.append_row([row_id, str(return_date), amount, account, person, notes])
     st.cache_data.clear()
@@ -151,7 +151,7 @@ def add_return(return_date: date, amount: float, account: str,
 
 def delete_return(row_id: str):
     ss = get_spreadsheet()
-    ws = ss.worksheet(SHEET_RETURNS)
+    ws = get_or_create_worksheet(ss, SHEET_RETURNS, RETURNS_COLS)
     cell = ws.find(row_id)
     if cell:
         ws.delete_rows(cell.row)
@@ -163,10 +163,10 @@ def delete_return(row_id: str):
 @st.cache_data(ttl=30)
 def get_snapshots() -> pd.DataFrame:
     ss = get_spreadsheet()
-    ws = ss.worksheet(SHEET_SNAPSHOTS)
+    ws = get_or_create_worksheet(ss, SHEET_SNAPSHOTS, SNAPSHOTS_COLS)
     df = _read_df(ws)
     if df.empty:
-        return df
+        return pd.DataFrame(columns=SNAPSHOTS_COLS)
     df["date"]    = pd.to_datetime(df["date"])
     df["balance"] = pd.to_numeric(df["balance"], errors="coerce").fillna(0)
     return df.sort_values("date").reset_index(drop=True)
@@ -175,7 +175,7 @@ def get_snapshots() -> pd.DataFrame:
 def add_snapshot(snapshot_date: date, account: str, person: str,
                  balance: float, source: str = "", notes: str = ""):
     ss = get_spreadsheet()
-    ws = ss.worksheet(SHEET_SNAPSHOTS)
+    ws = get_or_create_worksheet(ss, SHEET_SNAPSHOTS, SNAPSHOTS_COLS)
     row_id = str(uuid.uuid4())[:8]
     ws.append_row([row_id, str(snapshot_date), account, person, balance, source, notes])
     st.cache_data.clear()
@@ -183,7 +183,7 @@ def add_snapshot(snapshot_date: date, account: str, person: str,
 
 def delete_snapshot(row_id: str):
     ss = get_spreadsheet()
-    ws = ss.worksheet(SHEET_SNAPSHOTS)
+    ws = get_or_create_worksheet(ss, SHEET_SNAPSHOTS, SNAPSHOTS_COLS)
     cell = ws.find(row_id)
     if cell:
         ws.delete_rows(cell.row)
@@ -195,7 +195,17 @@ def delete_snapshot(row_id: str):
 @st.cache_data(ttl=60)
 def get_settings() -> dict:
     ss = get_spreadsheet()
-    ws = ss.worksheet(SHEET_SETTINGS)
+    ws = get_or_create_worksheet(ss, SHEET_SETTINGS, SETTINGS_COLS)
+    # Write defaults for any missing keys on first load
+    df = _read_df(ws)
+    if df.empty:
+        existing_keys = set()
+    else:
+        existing_keys = set(df["key"].tolist())
+    for key, value in DEFAULT_SETTINGS.items():
+        if key not in existing_keys:
+            ws.append_row([key, value])
+    # Re-read after any defaults were written
     df = _read_df(ws)
     if df.empty:
         return {}

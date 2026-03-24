@@ -68,14 +68,18 @@ f_withdrawals = apply_filters(withdrawals)
 
 # Apply year filter to flow data (contributions, returns, withdrawals).
 # Balance is cumulative so we always compute it from all history.
+def _filter_year(df, yr):
+    """Filter a DataFrame to a specific year, safely handling empty frames."""
+    if df.empty or "date" not in df.columns:
+        return df
+    return df[df["date"].dt.year == yr]
+
 if year_filter != "All time":
     _yr = int(year_filter)
-    f_contribs_yr    = f_contribs[f_contribs["date"].dt.year       == _yr]
-    f_returns_yr     = f_returns[f_returns["date"].dt.year          == _yr]
-    f_withdrawals_yr = f_withdrawals[f_withdrawals["date"].dt.year  == _yr] \
-                       if not f_withdrawals.empty else f_withdrawals
-    # For the chart, narrow snapshots to the selected year
-    f_snapshots_yr   = f_snapshots[f_snapshots["date"].dt.year      == _yr]
+    f_contribs_yr    = _filter_year(f_contribs,    _yr)
+    f_returns_yr     = _filter_year(f_returns,      _yr)
+    f_withdrawals_yr = _filter_year(f_withdrawals,  _yr)
+    f_snapshots_yr   = _filter_year(f_snapshots,    _yr)
 else:
     f_contribs_yr    = f_contribs
     f_returns_yr     = f_returns

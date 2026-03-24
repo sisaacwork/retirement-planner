@@ -5,6 +5,8 @@ Retirement Planner — Main entry point / Home page.
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from PIL import Image
+import os
 
 from utils.sheets import init_sheets, get_contributions, get_returns, get_snapshots, get_settings
 from utils.calculations import (
@@ -16,11 +18,25 @@ from utils.calculations import (
 
 # ─── Page config ─────────────────────────────────────────────────────────────
 
+_icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
+_page_icon = Image.open(_icon_path) if os.path.exists(_icon_path) else "🏦"
+
 st.set_page_config(
     page_title="Retirement Planner",
-    page_icon="🏦",
+    page_icon=_page_icon,
     layout="wide",
     initial_sidebar_state="expanded",
+)
+
+# Inject apple-touch-icon so iOS "Add to Home Screen" uses our icon
+st.markdown(
+    """
+    <link rel="apple-touch-icon" sizes="180x180"
+          href="https://raw.githubusercontent.com/sisaacwork/retirement-planner/main/assets/icon.png">
+    <meta name="apple-mobile-web-app-title" content="Retirement">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    """,
+    unsafe_allow_html=True,
 )
 
 # ─── Init sheets (creates tabs if needed) ─────────────────────────────────────

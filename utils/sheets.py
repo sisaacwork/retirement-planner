@@ -117,6 +117,20 @@ def add_contribution(contribution_date: date, amount: float, account: str,
     st.cache_data.clear()
 
 
+def add_contributions_bulk(rows: list[dict]):
+    """Write many contributions in a single API call. Each dict: date, amount, account, person, notes."""
+    if not rows:
+        return
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_CONTRIBUTIONS, CONTRIBUTIONS_COLS)
+    data = [
+        [str(uuid.uuid4())[:8], str(r["date"]), r["amount"], r["account"], r["person"], r.get("notes", "")]
+        for r in rows
+    ]
+    ws.append_rows(data)
+    st.cache_data.clear()
+
+
 def delete_contribution(row_id: str):
     ss = get_spreadsheet()
     ws = get_or_create_worksheet(ss, SHEET_CONTRIBUTIONS, CONTRIBUTIONS_COLS)
@@ -146,6 +160,20 @@ def add_return(return_date: date, amount: float, account: str,
     ws = get_or_create_worksheet(ss, SHEET_RETURNS, RETURNS_COLS)
     row_id = str(uuid.uuid4())[:8]
     ws.append_row([row_id, str(return_date), amount, account, person, notes])
+    st.cache_data.clear()
+
+
+def add_returns_bulk(rows: list[dict]):
+    """Write many return entries in a single API call. Each dict: date, amount, account, person, notes."""
+    if not rows:
+        return
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_RETURNS, RETURNS_COLS)
+    data = [
+        [str(uuid.uuid4())[:8], str(r["date"]), r["amount"], r["account"], r["person"], r.get("notes", "")]
+        for r in rows
+    ]
+    ws.append_rows(data)
     st.cache_data.clear()
 
 

@@ -7,6 +7,7 @@ import pandas as pd
 import plotly.express as px
 from PIL import Image
 import os
+import sys
 
 from utils.sheets import init_sheets, get_contributions, get_returns, get_snapshots, get_settings
 from utils.calculations import (
@@ -17,6 +18,8 @@ from utils.calculations import (
 )
 
 # ─── Page config ─────────────────────────────────────────────────────────────
+
+print(f"[startup] app.py loading — Python {sys.version}", flush=True)
 
 _icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
 _page_icon = Image.open(_icon_path) if os.path.exists(_icon_path) else "🏦"
@@ -41,9 +44,12 @@ st.markdown(
 
 # ─── Init sheets (creates tabs if needed) ─────────────────────────────────────
 
+print("[startup] calling init_sheets()", flush=True)
 try:
     init_sheets()
+    print("[startup] init_sheets() OK", flush=True)
 except Exception as e:
+    print(f"[startup] init_sheets() FAILED: {e}", flush=True)
     st.error(
         "⚠️ Could not connect to Google Sheets. "
         "Make sure you've added your credentials to `.streamlit/secrets.toml`. "

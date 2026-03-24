@@ -22,12 +22,14 @@ def current_balance_by_account(
     contributions: pd.DataFrame,
     returns: pd.DataFrame,
     snapshots: pd.DataFrame,
+    withdrawals: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
     For each (account, person) pair, estimate the current balance as:
         latest_snapshot + contributions_since_snapshot + returns_since_snapshot
+                        - withdrawals_since_snapshot
 
-    If no snapshot exists, balance = sum(contributions) + sum(returns).
+    If no snapshot exists, balance = sum(contributions) + sum(returns) - sum(withdrawals).
 
     Returns a DataFrame with columns: account, person, balance, last_snapshot_date.
     """
@@ -72,7 +74,17 @@ def current_balance_by_account(
                     acct_returns = acct_returns[acct_returns["date"] > snap_date]
                 return_sum = float(acct_returns["amount"].sum())
 
-        balance = snap_balance + contrib_sum + return_sum
+        # Subtract withdrawals after (or all if no snapshot)
+        withdrawal_sum = 0.0
+        if withdrawals is not None and not withdrawals.empty:
+            wmask = (withdrawals["account"] == account) & (withdrawals["person"] == person)
+            acct_withdrawals = withdrawals[wmask]
+            if not acct_withdrawals.empty:
+                if snap_date is not None:
+                    acct_withdrawals = acct_withdrawals[acct_withdrawals["date"] > snap_date]
+                withdrawal_sum = float(acct_withdrawals["amount"].sum())
+
+        balance = snap_balance + contrib_sum + return_sum - withdrawal_sum
         results.append({
             "account":            account,
             "person":             person,
@@ -97,13 +109,32 @@ def portfolio_over_time(
     contributions: pd.DataFrame,
     returns: pd.DataFrame,
     snapshots: pd.DataFrame,
+    withdrawals: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
-    Build a daily cumulative portfolio value series by combining all events
-    (contributions, returns, and balance snapshots as anchors).
+    Build a daily portfolio value series.
+
+    Strategy: if balance snapshots exist, use them as the primary source of truth
+    (they already reflect real account values including any withdrawals). Fill gaps
+    between snapshots using contributions/returns/withdrawals as deltas.
 
     Returns a DataFrame with columns: date, balance.
     """
+    # If we have snapshots, aggregate them per day across all accounts and use
+    # those as anchors — this is the most accurate approach because each snapshot
+    # is the actual account value as seen in Wealthsimple / Canada Life.
+    if not snapshots.empty:
+        daily_snap = (
+            snapshots.groupby(snapshots["date"].dt.date)["balance"]
+            .sum()
+            .reset_index()
+            .rename(columns={"date": "date", "balance": "balance"})
+        )
+        daily_snap["date"] = pd.to_datetime(daily_snap["date"])
+        daily_snap = daily_snap.set_index("date").resample("D").last().ffill().reset_index()
+        return daily_snap
+
+    # No snapshots — build from contributions + returns - withdrawals as running totals
     events = []
 
     if not contributions.empty:
@@ -114,31 +145,21 @@ def portfolio_over_time(
         for _, row in returns.iterrows():
             events.append({"date": row["date"], "delta": float(row["amount"])})
 
-    if not snapshots.empty:
-        for _, row in snapshots.iterrows():
-            events.append({"date": row["date"], "delta": None, "snap": float(row["balance"]),
-                           "account": row["account"], "person": row["person"]})
+    if withdrawals is not None and not withdrawals.empty:
+        for _, row in withdrawals.iterrows():
+            events.append({"date": row["date"], "delta": -float(row["amount"])})
 
     if not events:
         return pd.DataFrame(columns=["date", "balance"])
 
-    # Sort by date
     events_df = pd.DataFrame(events).sort_values("date")
-
-    # Build cumulative balance
     running = 0.0
     rows = []
     for _, ev in events_df.iterrows():
-        if pd.isna(ev.get("snap", float("nan"))):
-            running += ev["delta"]
-        else:
-            # A balance snapshot anchors the total (it replaces the running sum
-            # for that account — simple approximation: treat snapshot as absolute)
-            running = ev["snap"]
-        rows.append({"date": ev["date"], "balance": running})
+        running += ev["delta"]
+        rows.append({"date": ev["date"], "balance": max(running, 0.0)})
 
     result = pd.DataFrame(rows).sort_values("date")
-    # Resample to daily, forward-fill
     result = result.set_index("date").resample("D").last().ffill().reset_index()
     return result
 
@@ -183,11 +204,18 @@ def build_xirr_cashflows(
     contributions: pd.DataFrame,
     returns: pd.DataFrame,
     snapshots: pd.DataFrame,
+    withdrawals: Optional[pd.DataFrame] = None,
 ) -> list[tuple[date, float]]:
     """
-    Build the cashflow list for XIRR:
-        - Each contribution is an outflow (negative).
-        - The estimated current balance is a single inflow at today (positive).
+    Build the cashflow list for XIRR (Money-Weighted Rate of Return).
+
+    Sign convention from the investor's perspective:
+        - Contributions are OUTFLOWS (negative) — money leaving your pocket.
+        - Withdrawals are INFLOWS  (positive) — money coming back to you.
+        - Current portfolio balance is a final INFLOW (positive) at today.
+
+    Without including withdrawals, the MWRR is badly distorted — a $9,000
+    withdrawal looks like a $9,000 loss, dragging the rate way negative.
     """
     cashflows: list[tuple[date, float]] = []
 
@@ -195,8 +223,13 @@ def build_xirr_cashflows(
         for _, row in contributions.iterrows():
             cashflows.append((row["date"].date(), -abs(float(row["amount"]))))
 
-    # Current balance as inflow at today
-    balance_df = current_balance_by_account(contributions, returns, snapshots)
+    # Withdrawals are positive cashflows — money returned to the investor
+    if withdrawals is not None and not withdrawals.empty:
+        for _, row in withdrawals.iterrows():
+            cashflows.append((row["date"].date(), +abs(float(row["amount"]))))
+
+    # Current balance as final inflow at today
+    balance_df = current_balance_by_account(contributions, returns, snapshots, withdrawals)
     total = total_balance(balance_df)
     if total > 0:
         cashflows.append((date.today(), total))

@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-from utils.sheets import get_contributions, get_returns, get_snapshots, get_settings
+from utils.sheets import get_contributions, get_returns, get_snapshots, get_withdrawals, get_settings
 from utils.calculations import (
     current_balance_by_account, total_balance,
     build_xirr_cashflows, xirr,
@@ -24,11 +24,12 @@ st.divider()
 contributions = get_contributions()
 returns       = get_returns()
 snapshots     = get_snapshots()
+withdrawals   = get_withdrawals()
 settings      = get_settings()
 
-balance_df    = current_balance_by_account(contributions, returns, snapshots)
+balance_df    = current_balance_by_account(contributions, returns, snapshots, withdrawals)
 portfolio     = total_balance(balance_df)
-cashflows     = build_xirr_cashflows(contributions, returns, snapshots)
+cashflows     = build_xirr_cashflows(contributions, returns, snapshots, withdrawals)
 rate          = xirr(cashflows)
 monthly_avg   = avg_monthly_contribution(contributions)
 
@@ -50,11 +51,12 @@ def apply_filters(df):
         out = out[out["account"].isin(accounts_filter)]
     return out
 
-f_contribs  = apply_filters(contributions)
-f_returns   = apply_filters(returns)
-f_snapshots = apply_filters(snapshots)
+f_contribs    = apply_filters(contributions)
+f_returns     = apply_filters(returns)
+f_snapshots   = apply_filters(snapshots)
+f_withdrawals = apply_filters(withdrawals)
 
-f_balance_df = current_balance_by_account(f_contribs, f_returns, f_snapshots)
+f_balance_df = current_balance_by_account(f_contribs, f_returns, f_snapshots, f_withdrawals)
 f_portfolio  = total_balance(f_balance_df)
 
 # ─── KPI row ──────────────────────────────────────────────────────────────────
@@ -77,8 +79,13 @@ with c4:
     sign = "+" if total_returns >= 0 else ""
     st.metric("Total Returns", f"{sign}${total_returns:,.2f}")
 with c5:
-    market_gain = f_portfolio - total_contributions
-    pct = (market_gain / total_contributions * 100) if total_contributions > 0 else 0
+    # Market gain = balance - contributions + withdrawals
+    # Withdrawals are added back because that money left the portfolio intentionally,
+    # not due to market losses. Without this, every withdrawal looks like a loss.
+    total_withdrawals = float(f_withdrawals["amount"].sum()) if not f_withdrawals.empty else 0.0
+    net_invested = total_contributions - total_withdrawals
+    market_gain = f_portfolio - net_invested
+    pct = (market_gain / net_invested * 100) if net_invested > 0 else 0
     st.metric("Market Gain", f"${market_gain:,.2f}", delta=f"{pct:.1f}%")
 
 st.divider()
@@ -86,7 +93,7 @@ st.divider()
 # ─── Portfolio history ────────────────────────────────────────────────────────
 
 st.subheader("Portfolio Value Over Time")
-history = portfolio_over_time(f_contribs, f_returns, f_snapshots)
+history = portfolio_over_time(f_contribs, f_returns, f_snapshots, f_withdrawals)
 
 if not history.empty:
     fig = px.area(history, x="date", y="balance",

@@ -9,7 +9,7 @@ from PIL import Image
 import os
 import sys
 
-from utils.sheets import init_sheets, get_contributions, get_returns, get_snapshots, get_settings
+from utils.sheets import init_sheets, get_contributions, get_returns, get_snapshots, get_withdrawals, get_settings
 from utils.calculations import (
     current_balance_by_account, total_balance,
     build_xirr_cashflows, xirr,
@@ -63,9 +63,10 @@ except Exception as e:
 contributions = get_contributions()
 returns       = get_returns()
 snapshots     = get_snapshots()
+withdrawals   = get_withdrawals()
 settings      = get_settings()
 
-balance_df = current_balance_by_account(contributions, returns, snapshots)
+balance_df = current_balance_by_account(contributions, returns, snapshots, withdrawals)
 portfolio  = total_balance(balance_df)
 
 # ─── Header ───────────────────────────────────────────────────────────────────
@@ -92,7 +93,7 @@ with col1:
     st.metric("💰 Total Portfolio", f"${portfolio:,.2f}")
 
 # XIRR
-cashflows = build_xirr_cashflows(contributions, returns, snapshots)
+cashflows = build_xirr_cashflows(contributions, returns, snapshots, withdrawals)
 rate = xirr(cashflows)
 with col2:
     if rate is not None:
@@ -121,7 +122,7 @@ left, right = st.columns([2, 1])
 
 with left:
     st.subheader("Portfolio Over Time")
-    history = portfolio_over_time(contributions, returns, snapshots)
+    history = portfolio_over_time(contributions, returns, snapshots, withdrawals)
     if not history.empty:
         fig = px.area(
             history, x="date", y="balance",

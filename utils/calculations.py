@@ -112,55 +112,101 @@ def portfolio_over_time(
     withdrawals: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
-    Build a daily portfolio value series.
+    Build a daily portfolio value series across all accounts.
 
-    Strategy: if balance snapshots exist, use them as the primary source of truth
-    (they already reflect real account values including any withdrawals). Fill gaps
-    between snapshots using contributions/returns/withdrawals as deltas.
+    Each (account, person) pair is tracked independently, then summed by date.
+    Within each pair:
+      - Contributions, returns, and withdrawals are running deltas.
+      - Balance snapshots are absolute anchors (they override the delta-based
+        running total on that date, since they reflect the actual account value).
+
+    This hybrid approach preserves the full contribution history going back to
+    day one, while using real balance snapshots for accuracy wherever they exist.
 
     Returns a DataFrame with columns: date, balance.
     """
-    # If we have snapshots, aggregate them per day across all accounts and use
-    # those as anchors — this is the most accurate approach because each snapshot
-    # is the actual account value as seen in Wealthsimple / Canada Life.
-    if not snapshots.empty:
-        daily_snap = (
-            snapshots.groupby(snapshots["date"].dt.date)["balance"]
-            .sum()
-            .reset_index()
-            .rename(columns={"date": "date", "balance": "balance"})
-        )
-        daily_snap["date"] = pd.to_datetime(daily_snap["date"])
-        daily_snap = daily_snap.set_index("date").resample("D").last().ffill().reset_index()
-        return daily_snap
-
-    # No snapshots — build from contributions + returns - withdrawals as running totals
-    events = []
-
-    if not contributions.empty:
-        for _, row in contributions.iterrows():
-            events.append({"date": row["date"], "delta": float(row["amount"])})
-
-    if not returns.empty:
-        for _, row in returns.iterrows():
-            events.append({"date": row["date"], "delta": float(row["amount"])})
-
+    # Collect all (account, person) pairs seen in any dataset
+    pairs: set = set()
+    for df in [contributions, returns, snapshots]:
+        if not df.empty and "account" in df.columns and "person" in df.columns:
+            for _, row in df[["account", "person"]].drop_duplicates().iterrows():
+                pairs.add((row["account"], row["person"]))
     if withdrawals is not None and not withdrawals.empty:
-        for _, row in withdrawals.iterrows():
-            events.append({"date": row["date"], "delta": -float(row["amount"])})
+        for _, row in withdrawals[["account", "person"]].drop_duplicates().iterrows():
+            pairs.add((row["account"], row["person"]))
 
-    if not events:
+    if not pairs:
         return pd.DataFrame(columns=["date", "balance"])
 
-    events_df = pd.DataFrame(events).sort_values("date")
-    running = 0.0
-    rows = []
-    for _, ev in events_df.iterrows():
-        running += ev["delta"]
-        rows.append({"date": ev["date"], "balance": max(running, 0.0)})
+    # Determine overall date range
+    all_dates: list = []
+    for df in [contributions, returns, snapshots]:
+        if not df.empty and "date" in df.columns:
+            all_dates.extend(df["date"].tolist())
+    if withdrawals is not None and not withdrawals.empty:
+        all_dates.extend(withdrawals["date"].tolist())
+    if not all_dates:
+        return pd.DataFrame(columns=["date", "balance"])
 
-    result = pd.DataFrame(rows).sort_values("date")
-    result = result.set_index("date").resample("D").last().ffill().reset_index()
+    date_range = pd.date_range(
+        start=min(all_dates),
+        end=max(pd.Timestamp.today(), max(all_dates)),
+        freq="D",
+    )
+
+    total_series = pd.Series(0.0, index=date_range)
+
+    for account, person in pairs:
+        # Build a list of (timestamp, delta, is_snapshot, snap_value)
+        # Snapshots sort after deltas on the same day so the anchor wins.
+        events: list = []
+
+        if not contributions.empty:
+            m = (contributions["account"] == account) & (contributions["person"] == person)
+            for _, row in contributions[m].iterrows():
+                events.append((pd.Timestamp(row["date"]), float(row["amount"]), False, 0.0))
+
+        if not returns.empty:
+            m = (returns["account"] == account) & (returns["person"] == person)
+            for _, row in returns[m].iterrows():
+                events.append((pd.Timestamp(row["date"]), float(row["amount"]), False, 0.0))
+
+        if withdrawals is not None and not withdrawals.empty:
+            m = (withdrawals["account"] == account) & (withdrawals["person"] == person)
+            for _, row in withdrawals[m].iterrows():
+                events.append((pd.Timestamp(row["date"]), -float(row["amount"]), False, 0.0))
+
+        if not snapshots.empty:
+            m = (snapshots["account"] == account) & (snapshots["person"] == person)
+            for _, row in snapshots[m].iterrows():
+                events.append((pd.Timestamp(row["date"]), 0.0, True, float(row["balance"])))
+
+        if not events:
+            continue
+
+        # Sort: by date first, snapshots after deltas on the same day
+        events.sort(key=lambda x: (x[0], x[2]))
+
+        # Walk events and build a {date: balance} mapping for this account
+        running = 0.0
+        acct_points: dict = {}
+        for ts, delta, is_snap, snap_val in events:
+            day = ts.normalize()
+            if is_snap:
+                running = snap_val        # anchor to actual balance
+            else:
+                running += delta
+            acct_points[day] = max(running, 0.0)
+
+        # Reindex to full date range: forward-fill (hold last known balance),
+        # leave dates before first event as 0.
+        acct_series = pd.Series(acct_points).reindex(date_range)
+        acct_series = acct_series.ffill().fillna(0.0)
+
+        total_series = total_series + acct_series
+
+    result = total_series.reset_index()
+    result.columns = ["date", "balance"]
     return result
 
 

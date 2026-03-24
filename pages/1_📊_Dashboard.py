@@ -37,9 +37,19 @@ monthly_avg   = avg_monthly_contribution(contributions)
 
 with st.sidebar:
     st.header("Filters")
-    people_filter = st.multiselect("Person", ["Isaac", "Katherine"], default=["Isaac", "Katherine"])
+    people_filter   = st.multiselect("Person",  ["Isaac", "Katherine"], default=["Isaac", "Katherine"])
     accounts_filter = st.multiselect("Account", ["TFSA", "FHSA", "RRSP", "NRSP"],
                                      default=["TFSA", "FHSA", "RRSP", "NRSP"])
+
+    # Year filter — built from years that actually have contribution or return data
+    _data_years = sorted(set(
+        list(contributions["date"].dt.year.unique() if not contributions.empty else []) +
+        list(returns["date"].dt.year.unique()       if not returns.empty       else [])
+    ), reverse=True)
+    year_options  = ["All time"] + [str(y) for y in _data_years]
+    _default_idx  = year_options.index(str(pd.Timestamp.today().year)) \
+                    if str(pd.Timestamp.today().year) in year_options else 0
+    year_filter   = st.selectbox("Year", year_options, index=_default_idx)
 
 def apply_filters(df):
     if df.empty:
@@ -56,6 +66,23 @@ f_returns     = apply_filters(returns)
 f_snapshots   = apply_filters(snapshots)
 f_withdrawals = apply_filters(withdrawals)
 
+# Apply year filter to flow data (contributions, returns, withdrawals).
+# Balance is cumulative so we always compute it from all history.
+if year_filter != "All time":
+    _yr = int(year_filter)
+    f_contribs_yr    = f_contribs[f_contribs["date"].dt.year       == _yr]
+    f_returns_yr     = f_returns[f_returns["date"].dt.year          == _yr]
+    f_withdrawals_yr = f_withdrawals[f_withdrawals["date"].dt.year  == _yr] \
+                       if not f_withdrawals.empty else f_withdrawals
+    # For the chart, narrow snapshots to the selected year
+    f_snapshots_yr   = f_snapshots[f_snapshots["date"].dt.year      == _yr]
+else:
+    f_contribs_yr    = f_contribs
+    f_returns_yr     = f_returns
+    f_withdrawals_yr = f_withdrawals
+    f_snapshots_yr   = f_snapshots
+
+# Balance always uses full history regardless of year filter
 f_balance_df = current_balance_by_account(f_contribs, f_returns, f_snapshots, f_withdrawals)
 f_portfolio  = total_balance(f_balance_df)
 
@@ -71,29 +98,30 @@ with c2:
                   help="Money-Weighted Rate of Return (XIRR) across all contributions.")
     else:
         st.metric("MWRR (Annualised)", "—")
+_year_label = year_filter if year_filter != "All time" else "All Time"
 with c3:
-    total_contributions = float(f_contribs["amount"].sum()) if not f_contribs.empty else 0.0
-    st.metric("Total Contributed", f"${total_contributions:,.2f}")
+    total_contributions = float(f_contribs_yr["amount"].sum()) if not f_contribs_yr.empty else 0.0
+    st.metric(f"Contributed ({_year_label})", f"${total_contributions:,.2f}")
 with c4:
-    total_returns = float(f_returns["amount"].sum()) if not f_returns.empty else 0.0
+    total_returns = float(f_returns_yr["amount"].sum()) if not f_returns_yr.empty else 0.0
     sign = "+" if total_returns >= 0 else ""
-    st.metric("Total Returns", f"{sign}${total_returns:,.2f}")
+    st.metric(f"Returns ({_year_label})", f"{sign}${total_returns:,.2f}")
 with c5:
-    # Market gain = balance - contributions + withdrawals
-    # Withdrawals are added back because that money left the portfolio intentionally,
-    # not due to market losses. Without this, every withdrawal looks like a loss.
-    total_withdrawals = float(f_withdrawals["amount"].sum()) if not f_withdrawals.empty else 0.0
-    net_invested = total_contributions - total_withdrawals
-    market_gain = f_portfolio - net_invested
+    # Market gain = balance - net invested (contributions minus withdrawals).
+    # Always uses all-time data since balance is cumulative.
+    total_contributions_all = float(f_contribs["amount"].sum()) if not f_contribs.empty else 0.0
+    total_withdrawals_all   = float(f_withdrawals["amount"].sum()) if not f_withdrawals.empty else 0.0
+    net_invested = total_contributions_all - total_withdrawals_all
+    market_gain  = f_portfolio - net_invested
     pct = (market_gain / net_invested * 100) if net_invested > 0 else 0
-    st.metric("Market Gain", f"${market_gain:,.2f}", delta=f"{pct:.1f}%")
+    st.metric("Market Gain (All Time)", f"${market_gain:,.2f}", delta=f"{pct:.1f}%")
 
 st.divider()
 
 # ─── Portfolio history ────────────────────────────────────────────────────────
 
-st.subheader("Portfolio Value Over Time")
-history = portfolio_over_time(f_contribs, f_returns, f_snapshots, f_withdrawals)
+st.subheader(f"Portfolio Value Over Time{' — ' + year_filter if year_filter != 'All time' else ''}")
+history = portfolio_over_time(f_contribs_yr, f_returns_yr, f_snapshots_yr, f_withdrawals_yr)
 
 if not history.empty:
     fig = px.area(history, x="date", y="balance",
@@ -112,10 +140,10 @@ st.divider()
 col_a, col_b = st.columns(2)
 
 with col_a:
-    st.subheader("Monthly Contributions")
-    if not f_contribs.empty:
+    st.subheader(f"Monthly Contributions ({_year_label})")
+    if not f_contribs_yr.empty:
         monthly = (
-            f_contribs.copy()
+            f_contribs_yr.copy()
             .assign(month=lambda x: x["date"].dt.to_period("M").astype(str))
             .groupby("month")["amount"]
             .sum()
@@ -131,9 +159,9 @@ with col_a:
         st.caption("No contributions logged yet.")
 
 with col_b:
-    st.subheader("Contributions by Account")
-    if not f_contribs.empty:
-        by_account = f_contribs.groupby("account")["amount"].sum().reset_index()
+    st.subheader(f"Contributions by Account ({_year_label})")
+    if not f_contribs_yr.empty:
+        by_account = f_contribs_yr.groupby("account")["amount"].sum().reset_index()
         fig4 = px.pie(by_account, names="account", values="amount",
                       color_discrete_sequence=px.colors.qualitative.Set2, hole=0.35)
         fig4.update_layout(margin=dict(l=0, r=0, t=10, b=0))

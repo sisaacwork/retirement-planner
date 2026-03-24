@@ -145,7 +145,7 @@ with col1:
     fhsa_open_isaac = st.number_input(
         "FHSA Account Opened (Year)",
         min_value=2023, max_value=date.today().year,
-        value=int(s("fhsa_open_year_isaac", "2023")),
+        value=int(s("fhsa_open_year_isaac", "2025")),
         key="fhsa_open_isaac",
     )
     fhsa_prior_isaac = st.number_input(
@@ -159,7 +159,7 @@ with col2:
     fhsa_open_katherine = st.number_input(
         "FHSA Account Opened (Year)",
         min_value=2023, max_value=date.today().year,
-        value=int(s("fhsa_open_year_katherine", "2023")),
+        value=int(s("fhsa_open_year_katherine", "2026")),
         key="fhsa_open_katherine",
     )
     fhsa_prior_katherine = st.number_input(

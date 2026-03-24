@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 from utils.sheets import get_contributions, get_withdrawals, get_settings
 from utils.calculations import (
     tfsa_cumulative_room, tfsa_remaining_room,
-    fhsa_remaining_room, rrsp_remaining_room,
+    fhsa_cumulative_room, fhsa_remaining_room, rrsp_remaining_room,
 )
 from utils.constants import TFSA_ANNUAL_LIMITS, FHSA_ANNUAL_LIMIT, FHSA_LIFETIME_LIMIT
 
@@ -100,9 +100,12 @@ for person, birth_year, tfsa_eligible, fhsa_open, rrsp_room, tfsa_prior, tfsa_pr
     tfsa_used      = tfsa_total - tfsa_remaining
 
     # ── FHSA ──────────────────────────────────────────────────────────────────
-    fhsa_remaining = fhsa_remaining_room(fhsa_open, contributions, fhsa_prior, person=person)
-    fhsa_total     = FHSA_LIFETIME_LIMIT
-    fhsa_used      = fhsa_total - fhsa_remaining
+    fhsa_accumulated = fhsa_cumulative_room(fhsa_open)   # room earned so far
+    fhsa_remaining   = fhsa_remaining_room(fhsa_open, contributions, fhsa_prior, person=person)
+    fhsa_total       = FHSA_LIFETIME_LIMIT
+    # fhsa_used = how much of your *accumulated* room you've actually used
+    # (NOT lifetime - remaining, which produces a wildly inflated number)
+    fhsa_used        = fhsa_accumulated - fhsa_remaining
 
     # ── RRSP ──────────────────────────────────────────────────────────────────
     rrsp_remaining = rrsp_remaining_room(rrsp_room, contributions, person=person)
@@ -124,11 +127,13 @@ for person, birth_year, tfsa_eligible, fhsa_open, rrsp_room, tfsa_prior, tfsa_pr
         st.markdown("**🏠 FHSA**")
         if fhsa_open < 2023:
             st.info("FHSA opened before 2023 — adjusted to 2023 launch date.")
-        st.metric("Remaining Room",  f"${fhsa_remaining:,.2f}")
-        st.metric("Lifetime Limit",  f"${fhsa_total:,.2f}")
-        st.metric("Used (tracked)",  f"${fhsa_used:,.2f}")
-        fhsa_pct = min(fhsa_used / fhsa_total * 100, 100) if fhsa_total > 0 else 0
-        st.progress(fhsa_pct / 100, text=f"{fhsa_pct:.1f}% of lifetime limit")
+        st.metric("Remaining Room",       f"${fhsa_remaining:,.2f}")
+        st.metric("Room Accumulated",     f"${fhsa_accumulated:,.2f}",
+                  help=f"${FHSA_ANNUAL_LIMIT:,}/year since {fhsa_open}. Lifetime max: ${fhsa_total:,}.")
+        st.metric("Used (tracked)",       f"${fhsa_used:,.2f}")
+        # Progress bar shows % of lifetime $40k limit used
+        fhsa_lifetime_pct = min(fhsa_used / fhsa_total * 100, 100) if fhsa_total > 0 else 0
+        st.progress(fhsa_lifetime_pct / 100, text=f"{fhsa_lifetime_pct:.1f}% of ${fhsa_total:,} lifetime limit")
         st.caption(f"Annual FHSA limit: ${FHSA_ANNUAL_LIMIT:,}/year · Max lifetime: ${fhsa_total:,}")
 
     with col3:

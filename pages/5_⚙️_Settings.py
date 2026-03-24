@@ -32,6 +32,15 @@ with col1:
         value=int(s("isaac_birth_year", "1995")),
         key="isaac_birth",
     )
+    isaac_tfsa_eligible = st.number_input(
+        "TFSA Eligible From (Year)",
+        min_value=2009, max_value=date.today().year,
+        value=int(s("tfsa_eligible_year_isaac", "2025")),
+        key="isaac_tfsa_eligible",
+        help="The first year you were a Canadian resident and eligible to contribute to a TFSA. "
+             "For most people this matches their 18th birthday year, but if you moved to Canada "
+             "later it's the year you became a resident.",
+    )
 with col2:
     st.markdown("**Katherine**")
     katherine_birth = st.number_input(
@@ -39,6 +48,13 @@ with col2:
         min_value=1950, max_value=date.today().year - 18,
         value=int(s("katherine_birth_year", "1995")),
         key="katherine_birth",
+    )
+    katherine_tfsa_eligible = st.number_input(
+        "TFSA Eligible From (Year)",
+        min_value=2009, max_value=date.today().year,
+        value=int(s("tfsa_eligible_year_katherine", "2026")),
+        key="katherine_tfsa_eligible",
+        help="The first year Katherine was a Canadian resident and eligible to contribute to a TFSA.",
     )
 
 st.divider()
@@ -189,6 +205,8 @@ if st.button("💾 Save All Settings", type="primary", use_container_width=True)
     updates = {
         "isaac_birth_year":                   str(int(isaac_birth)),
         "katherine_birth_year":               str(int(katherine_birth)),
+        "tfsa_eligible_year_isaac":           str(int(isaac_tfsa_eligible)),
+        "tfsa_eligible_year_katherine":       str(int(katherine_tfsa_eligible)),
         "rrsp_room_isaac":                    str(rrsp_isaac),
         "rrsp_room_katherine":                str(rrsp_katherine),
         "tfsa_prior_contributions_isaac":     str(tfsa_prior_isaac),

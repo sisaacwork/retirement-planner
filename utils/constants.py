@@ -56,9 +56,11 @@ DEFAULT_SETTINGS = {
     "rrsp_room_katherine":                 "0",
     "tfsa_prior_contributions_isaac":      "0",
     "tfsa_prior_contributions_katherine":  "0",
+    "tfsa_eligible_year_isaac":            "2025",
+    "tfsa_eligible_year_katherine":        "2026",
     "fhsa_prior_contributions_isaac":      "0",
     "fhsa_prior_contributions_katherine":  "0",
-    "fhsa_open_year_isaac":                "2023",
-    "fhsa_open_year_katherine":            "2023",
+    "fhsa_open_year_isaac":                "2025",
+    "fhsa_open_year_katherine":            "2026",
     "monthly_contribution_target":         "1000",
 }

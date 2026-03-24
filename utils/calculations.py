@@ -257,14 +257,28 @@ def avg_monthly_contribution(contributions: pd.DataFrame, lookback_months: int =
 
 # ─── Canadian Contribution Room ───────────────────────────────────────────────
 
-def tfsa_cumulative_room(birth_year: int, as_of_year: Optional[int] = None) -> float:
+def tfsa_cumulative_room(
+    birth_year: int,
+    as_of_year: Optional[int] = None,
+    eligible_from_year: Optional[int] = None,
+) -> float:
     """
-    Total TFSA room accumulated from eligibility (age 18 or 2009) through `as_of_year`.
+    Total TFSA room accumulated through `as_of_year`.
+
+    Eligibility starts at the LATER of:
+      - the year the person turned 18, OR 2009 (standard rule), AND
+      - `eligible_from_year` if provided (used for non-residents who became
+        eligible after turning 18, e.g. new Canadian residents).
     """
     if as_of_year is None:
         as_of_year = date.today().year
 
-    eligible_from = max(birth_year + 18, 2009)
+    age_based = max(birth_year + 18, 2009)
+    if eligible_from_year is not None:
+        eligible_from = max(age_based, eligible_from_year)
+    else:
+        eligible_from = age_based
+
     total = 0.0
     for year, limit in TFSA_ANNUAL_LIMITS.items():
         if eligible_from <= year <= as_of_year:
@@ -278,11 +292,12 @@ def tfsa_remaining_room(
     prior_contributions: float = 0.0,
     withdrawals: float = 0.0,
     person: Optional[str] = None,
+    eligible_from_year: Optional[int] = None,
 ) -> float:
     """
-    Remaining TFSA room = cumulative_room - prior_contributions - in_app_contributions + withdrawals_prev_year
+    Remaining TFSA room = cumulative_room - prior_contributions - in_app_contributions + withdrawals
     """
-    total_room = tfsa_cumulative_room(birth_year)
+    total_room = tfsa_cumulative_room(birth_year, eligible_from_year=eligible_from_year)
     in_app = 0.0
     if not contributions.empty:
         mask = contributions["account"] == "TFSA"

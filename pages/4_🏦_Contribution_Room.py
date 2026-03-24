@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from utils.sheets import get_contributions, get_settings
+from utils.sheets import get_contributions, get_withdrawals, get_settings
 from utils.calculations import (
     tfsa_cumulative_room, tfsa_remaining_room,
     fhsa_remaining_room, rrsp_remaining_room,
@@ -21,6 +21,7 @@ st.divider()
 # ─── Load data ────────────────────────────────────────────────────────────────
 
 contributions = get_contributions()
+withdrawals   = get_withdrawals()
 settings      = get_settings()
 
 def s(key, default="0"):
@@ -28,18 +29,20 @@ def s(key, default="0"):
     return settings.get(key, default)
 
 try:
-    isaac_birth_year        = int(s("isaac_birth_year", "1995"))
-    katherine_birth_year    = int(s("katherine_birth_year", "1995"))
-    isaac_tfsa_eligible     = int(s("tfsa_eligible_year_isaac", "2025"))
-    katherine_tfsa_eligible = int(s("tfsa_eligible_year_katherine", "2026"))
-    isaac_fhsa_open         = int(s("fhsa_open_year_isaac", "2025"))
-    katherine_fhsa_open     = int(s("fhsa_open_year_katherine", "2026"))
-    rrsp_room_isaac         = float(s("rrsp_room_isaac", "0"))
-    rrsp_room_katherine     = float(s("rrsp_room_katherine", "0"))
-    tfsa_prior_isaac        = float(s("tfsa_prior_contributions_isaac", "0"))
-    tfsa_prior_katherine    = float(s("tfsa_prior_contributions_katherine", "0"))
-    fhsa_prior_isaac        = float(s("fhsa_prior_contributions_isaac", "0"))
-    fhsa_prior_katherine    = float(s("fhsa_prior_contributions_katherine", "0"))
+    isaac_birth_year          = int(s("isaac_birth_year", "1995"))
+    katherine_birth_year      = int(s("katherine_birth_year", "1995"))
+    isaac_tfsa_eligible       = int(s("tfsa_eligible_year_isaac", "2025"))
+    katherine_tfsa_eligible   = int(s("tfsa_eligible_year_katherine", "2026"))
+    isaac_fhsa_open           = int(s("fhsa_open_year_isaac", "2025"))
+    katherine_fhsa_open       = int(s("fhsa_open_year_katherine", "2026"))
+    rrsp_room_isaac           = float(s("rrsp_room_isaac", "0"))
+    rrsp_room_katherine       = float(s("rrsp_room_katherine", "0"))
+    tfsa_prior_isaac          = float(s("tfsa_prior_contributions_isaac", "0"))
+    tfsa_prior_katherine      = float(s("tfsa_prior_contributions_katherine", "0"))
+    tfsa_prior_w_isaac        = float(s("tfsa_prior_withdrawals_isaac", "0"))
+    tfsa_prior_w_katherine    = float(s("tfsa_prior_withdrawals_katherine", "0"))
+    fhsa_prior_isaac          = float(s("fhsa_prior_contributions_isaac", "0"))
+    fhsa_prior_katherine      = float(s("fhsa_prior_contributions_katherine", "0"))
 except (ValueError, TypeError):
     st.error("⚠️ Some settings are missing or invalid. Please visit ⚙️ Settings to configure them.")
     st.stop()
@@ -76,18 +79,24 @@ def gauge(used: float, total: float, label: str, colour: str) -> go.Figure:
 
 # ─── Per-person panels ────────────────────────────────────────────────────────
 
-for person, birth_year, tfsa_eligible, fhsa_open, rrsp_room, tfsa_prior, fhsa_prior in [
+for person, birth_year, tfsa_eligible, fhsa_open, rrsp_room, tfsa_prior, tfsa_prior_w, fhsa_prior in [
     ("Isaac",     isaac_birth_year,    isaac_tfsa_eligible,     isaac_fhsa_open,
-     rrsp_room_isaac,     tfsa_prior_isaac,    fhsa_prior_isaac),
+     rrsp_room_isaac,     tfsa_prior_isaac,    tfsa_prior_w_isaac,    fhsa_prior_isaac),
     ("Katherine", katherine_birth_year, katherine_tfsa_eligible, katherine_fhsa_open,
-     rrsp_room_katherine, tfsa_prior_katherine, fhsa_prior_katherine),
+     rrsp_room_katherine, tfsa_prior_katherine, tfsa_prior_w_katherine, fhsa_prior_katherine),
 ]:
     st.subheader(f"👤 {person}")
 
     # ── TFSA ──────────────────────────────────────────────────────────────────
     tfsa_total     = tfsa_cumulative_room(birth_year, eligible_from_year=tfsa_eligible)
-    tfsa_remaining = tfsa_remaining_room(birth_year, contributions, tfsa_prior,
-                                         person=person, eligible_from_year=tfsa_eligible)
+    tfsa_remaining = tfsa_remaining_room(
+        birth_year, contributions,
+        prior_contributions = tfsa_prior,
+        prior_withdrawals   = tfsa_prior_w,
+        person              = person,
+        eligible_from_year  = tfsa_eligible,
+        withdrawals_df      = withdrawals,
+    )
     tfsa_used      = tfsa_total - tfsa_remaining
 
     # ── FHSA ──────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 """
-Log Contribution page — single entry, bulk historical entry, and history view.
+Log Contribution page — single entry, bulk historical entry, withdrawals, and history.
 """
 
 import streamlit as st
@@ -8,18 +8,21 @@ from datetime import date, timedelta
 
 from utils.sheets import (
     get_contributions, add_contribution, add_contributions_bulk, delete_contribution,
+    get_withdrawals, add_withdrawal, delete_withdrawal,
     get_settings,
 )
 from utils.constants import ACCOUNT_TYPES, PEOPLE
 
 st.set_page_config(page_title="Log Contribution", page_icon="💰", layout="wide")
-st.title("💰 Log a Contribution")
-st.caption("Record money you've added to any of your accounts.")
+st.title("💰 Contributions & Withdrawals")
+st.caption("Record money added to or taken from your accounts.")
 st.divider()
 
 settings = get_settings()
 
-tab_single, tab_bulk, tab_history = st.tabs(["➕ Single Entry", "📥 Bulk / Historical Entry", "📋 History"])
+tab_single, tab_bulk, tab_withdrawal, tab_history = st.tabs([
+    "➕ Add Contribution", "📥 Bulk / Historical", "🏧 Withdraw Funds", "📋 History"
+])
 
 # ─── Tab 1: Single Entry ──────────────────────────────────────────────────────
 
@@ -106,7 +109,81 @@ with tab_bulk:
             st.warning("No rows with amounts > $0 to save.")
 
 
-# ─── Tab 3: History ───────────────────────────────────────────────────────────
+# ─── Tab 3: Withdrawals ───────────────────────────────────────────────────────
+
+with tab_withdrawal:
+    st.subheader("🏧 Log a Withdrawal")
+    st.caption(
+        "Record money you've taken out of an account. "
+        "**TFSA note:** withdrawn amounts are added back to your contribution room "
+        "on January 1st of the *following* year — not immediately."
+    )
+
+    with st.form("withdrawal_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            w_date    = st.date_input("Date", value=date.today(), key="w_date")
+            w_amount  = st.number_input("Amount Withdrawn (CA$)", min_value=0.01,
+                                        step=50.0, format="%.2f")
+        with col2:
+            w_account = st.selectbox("Account", ACCOUNT_TYPES, key="w_account")
+            w_person  = st.selectbox("Who withdrew?", PEOPLE, key="w_person")
+        w_notes = st.text_input("Notes (optional)", key="w_notes",
+                                placeholder="e.g. Home down payment, emergency fund")
+
+        if st.form_submit_button("🏧 Record Withdrawal", type="primary", use_container_width=True):
+            add_withdrawal(w_date, w_amount, w_account, w_person, w_notes)
+            st.success(f"✅ Recorded withdrawal of ${w_amount:,.2f} from {w_account} ({w_person}) on {w_date}.")
+            if w_account == "TFSA":
+                st.info(
+                    f"💡 This ${w_amount:,.2f} TFSA withdrawal will be added back to "
+                    f"{w_person}'s contribution room on **January 1, {w_date.year + 1}**."
+                )
+
+    st.divider()
+
+    # Withdrawal history
+    withdrawals = get_withdrawals()
+    if not withdrawals.empty:
+        st.subheader("Withdrawal History")
+
+        wf1, wf2 = st.columns(2)
+        with wf1:
+            wsel_person  = st.multiselect("Person",  PEOPLE,        default=PEOPLE,        key="wf_person")
+        with wf2:
+            wsel_account = st.multiselect("Account", ACCOUNT_TYPES, default=ACCOUNT_TYPES, key="wf_account")
+
+        wfiltered = withdrawals[
+            withdrawals["person"].isin(wsel_person) &
+            withdrawals["account"].isin(wsel_account)
+        ].sort_values("date", ascending=False)
+
+        if not wfiltered.empty:
+            st.info(f"Total withdrawn: **${wfiltered['amount'].sum():,.2f}** across {len(wfiltered)} entries")
+            for _, row in wfiltered.iterrows():
+                with st.expander(
+                    f"**{row['date'].strftime('%b %d, %Y')}** — {row['account']} ({row['person']}) — ${row['amount']:,.2f}",
+                    expanded=False,
+                ):
+                    c1, c2 = st.columns([3, 1])
+                    with c1:
+                        st.write(f"**Date:** {row['date'].strftime('%B %d, %Y')}")
+                        st.write(f"**Account:** {row['account']}")
+                        st.write(f"**Person:** {row['person']}")
+                        st.write(f"**Amount:** ${row['amount']:,.2f}")
+                        if row.get("notes"):
+                            st.write(f"**Notes:** {row['notes']}")
+                        if row["account"] == "TFSA":
+                            st.caption(f"Room recovery: Jan 1, {row['date'].year + 1}")
+                    with c2:
+                        if st.button("🗑️ Delete", key=f"del_w_{row['id']}"):
+                            delete_withdrawal(str(row["id"]))
+                            st.rerun()
+    else:
+        st.info("No withdrawals recorded yet.")
+
+
+# ─── Tab 4: History ───────────────────────────────────────────────────────────
 
 with tab_history:
     contributions = get_contributions()

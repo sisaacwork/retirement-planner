@@ -89,28 +89,44 @@ st.divider()
 
 # ─── Section 3: TFSA adjustments ─────────────────────────────────────────────
 
-st.subheader("🏦 TFSA — Prior Contributions")
+st.subheader("🏦 TFSA — Prior Contributions & Withdrawals")
 st.caption(
-    "If you made TFSA contributions **before** using this app (e.g. through previous years "
-    "or another platform), enter the total here so your remaining room is accurate."
+    "If you made TFSA contributions or withdrawals **before** using this app, "
+    "enter the totals here so your remaining room is accurate. "
+    "Only prior-year withdrawals restore room (CRA rule)."
 )
 
 col1, col2 = st.columns(2)
 with col1:
-    st.markdown("**Isaac — Pre-app TFSA contributions**")
+    st.markdown("**Isaac**")
     tfsa_prior_isaac = st.number_input(
-        "Amount (CA$)",
+        "Pre-app contributions (CA$)",
         min_value=0.0, step=100.0, format="%.2f",
         value=float(s("tfsa_prior_contributions_isaac", "0") or 0),
         key="tfsa_prior_isaac",
     )
+    tfsa_prior_w_isaac = st.number_input(
+        "Pre-app withdrawals from prior years (CA$)",
+        min_value=0.0, step=100.0, format="%.2f",
+        value=float(s("tfsa_prior_withdrawals_isaac", "0") or 0),
+        key="tfsa_prior_w_isaac",
+        help="TFSA withdrawals made before using this app where the room has already "
+             "been recovered (i.e. withdrawn in a prior calendar year).",
+    )
 with col2:
-    st.markdown("**Katherine — Pre-app TFSA contributions**")
+    st.markdown("**Katherine**")
     tfsa_prior_katherine = st.number_input(
-        "Amount (CA$)",
+        "Pre-app contributions (CA$)",
         min_value=0.0, step=100.0, format="%.2f",
         value=float(s("tfsa_prior_contributions_katherine", "0") or 0),
         key="tfsa_prior_katherine",
+    )
+    tfsa_prior_w_katherine = st.number_input(
+        "Pre-app withdrawals from prior years (CA$)",
+        min_value=0.0, step=100.0, format="%.2f",
+        value=float(s("tfsa_prior_withdrawals_katherine", "0") or 0),
+        key="tfsa_prior_w_katherine",
+        help="TFSA withdrawals made before using this app where the room has already been recovered.",
     )
 
 st.divider()
@@ -211,6 +227,8 @@ if st.button("💾 Save All Settings", type="primary", use_container_width=True)
         "rrsp_room_katherine":                str(rrsp_katherine),
         "tfsa_prior_contributions_isaac":     str(tfsa_prior_isaac),
         "tfsa_prior_contributions_katherine": str(tfsa_prior_katherine),
+        "tfsa_prior_withdrawals_isaac":       str(tfsa_prior_w_isaac),
+        "tfsa_prior_withdrawals_katherine":   str(tfsa_prior_w_katherine),
         "fhsa_open_year_isaac":               str(int(fhsa_open_isaac)),
         "fhsa_open_year_katherine":           str(int(fhsa_open_katherine)),
         "fhsa_prior_contributions_isaac":     str(fhsa_prior_isaac),

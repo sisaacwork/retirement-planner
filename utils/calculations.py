@@ -255,6 +255,139 @@ def avg_monthly_contribution(contributions: pd.DataFrame, lookback_months: int =
     return total / lookback_months
 
 
+# ─── Return derivation from balances ─────────────────────────────────────────
+
+def calculate_return_from_balance(
+    new_balance: float,
+    new_date: date,
+    account: str,
+    person: str,
+    contributions: pd.DataFrame,
+    snapshots: pd.DataFrame,
+    withdrawals: Optional[pd.DataFrame] = None,
+) -> dict:
+    """
+    Given a newly recorded balance, derive the implied market return since the
+    last known balance snapshot for that account/person.
+
+    return = new_balance − prev_balance − contributions_between + withdrawals_between
+
+    Withdrawals are added back because taking money out reduces the balance
+    without being a market loss — we want to isolate the pure investment return.
+
+    Returns a dict with keys:
+        return_amount       – the derived CA$ return (None if no prior snapshot)
+        prev_balance        – the previous snapshot balance (None if no prior)
+        prev_date           – date of the previous snapshot (None if no prior)
+        contrib_between     – sum of contributions between the two dates
+        withdrawal_between  – sum of withdrawals between the two dates
+    """
+    prev_balance: Optional[float] = None
+    prev_date: Optional[date]     = None
+
+    if not snapshots.empty:
+        mask = (
+            (snapshots["account"] == account) &
+            (snapshots["person"]  == person)  &
+            (snapshots["date"].dt.date < new_date)
+        )
+        prior = snapshots[mask]
+        if not prior.empty:
+            latest       = prior.loc[prior["date"].idxmax()]
+            prev_balance = float(latest["balance"])
+            prev_date    = latest["date"].date()
+
+    if prev_balance is None:
+        return {"return_amount": None, "prev_balance": None,
+                "prev_date": None, "contrib_between": 0.0, "withdrawal_between": 0.0}
+
+    contrib_between = 0.0
+    if not contributions.empty:
+        cmask = (
+            (contributions["account"] == account) &
+            (contributions["person"]  == person)  &
+            (contributions["date"].dt.date > prev_date) &
+            (contributions["date"].dt.date <= new_date)
+        )
+        contrib_between = float(contributions[cmask]["amount"].sum())
+
+    withdrawal_between = 0.0
+    if withdrawals is not None and not withdrawals.empty:
+        wmask = (
+            (withdrawals["account"] == account) &
+            (withdrawals["person"]  == person)  &
+            (withdrawals["date"].dt.date > prev_date) &
+            (withdrawals["date"].dt.date <= new_date)
+        )
+        withdrawal_between = float(withdrawals[wmask]["amount"].sum())
+
+    return {
+        "return_amount":      new_balance - prev_balance - contrib_between + withdrawal_between,
+        "prev_balance":       prev_balance,
+        "prev_date":          prev_date,
+        "contrib_between":    contrib_between,
+        "withdrawal_between": withdrawal_between,
+    }
+
+
+def derive_returns_from_balance_series(
+    entries: list[dict],
+    account: str,
+    person: str,
+    contributions: pd.DataFrame,
+    existing_snapshots: pd.DataFrame,
+    withdrawals: Optional[pd.DataFrame] = None,
+) -> list[dict]:
+    """
+    Given a time-ordered list of {date, balance} dicts, calculate the implied
+    return for each entry relative to the immediately preceding balance.
+
+    The first entry is compared against the most recent existing snapshot in the
+    database (if any); otherwise its return_amount is None (treated as the
+    opening balance with no return).
+
+    Returns a list of dicts with keys:
+        date, balance, return_amount, contrib_between, withdrawal_between, prev_balance, prev_date
+    """
+    sorted_entries    = sorted(entries, key=lambda x: x["date"])
+    running_snapshots = existing_snapshots.copy() if not existing_snapshots.empty else pd.DataFrame()
+
+    results = []
+    for entry in sorted_entries:
+        entry_date    = entry["date"] if isinstance(entry["date"], date) else date.fromisoformat(str(entry["date"]))
+        entry_balance = float(entry["balance"])
+
+        info = calculate_return_from_balance(
+            new_balance   = entry_balance,
+            new_date      = entry_date,
+            account       = account,
+            person        = person,
+            contributions = contributions,
+            snapshots     = running_snapshots,
+            withdrawals   = withdrawals,
+        )
+
+        results.append({
+            "date":               entry_date,
+            "balance":            entry_balance,
+            "return_amount":      info["return_amount"],
+            "prev_balance":       info["prev_balance"],
+            "prev_date":          info["prev_date"],
+            "contrib_between":    info["contrib_between"],
+            "withdrawal_between": info["withdrawal_between"],
+        })
+
+        new_row = pd.DataFrame([{
+            "id": "temp", "date": pd.Timestamp(entry_date),
+            "account": account, "person": person,
+            "balance": entry_balance, "source": "", "notes": "",
+        }])
+        running_snapshots = pd.concat([running_snapshots, new_row], ignore_index=True) \
+            if not running_snapshots.empty else new_row
+
+    return results
+
+
 # ─── Canadian Contribution Room ───────────────────────────────────────────────
 
 def tfsa_cumulative_room(
@@ -290,21 +423,46 @@ def tfsa_remaining_room(
     birth_year: int,
     contributions: pd.DataFrame,
     prior_contributions: float = 0.0,
-    withdrawals: float = 0.0,
+    prior_withdrawals: float = 0.0,
     person: Optional[str] = None,
     eligible_from_year: Optional[int] = None,
+    withdrawals_df: Optional[pd.DataFrame] = None,
 ) -> float:
     """
-    Remaining TFSA room = cumulative_room - prior_contributions - in_app_contributions + withdrawals
+    Remaining TFSA room = cumulative_room
+                         - prior_contributions (before app)
+                         - in_app_contributions
+                         + prior_withdrawals (before app, from prior calendar years)
+                         + in_app_withdrawals_from_prior_years
+
+    CRA rule: TFSA withdrawals are added back to your room on January 1st of
+    the FOLLOWING year — not immediately. So only withdrawals made before the
+    current calendar year are counted.
     """
     total_room = tfsa_cumulative_room(birth_year, eligible_from_year=eligible_from_year)
-    in_app = 0.0
+
+    in_app_contributions = 0.0
     if not contributions.empty:
         mask = contributions["account"] == "TFSA"
         if person:
             mask &= contributions["person"] == person
-        in_app = float(contributions[mask]["amount"].sum())
-    return total_room - prior_contributions - in_app + withdrawals
+        in_app_contributions = float(contributions[mask]["amount"].sum())
+
+    # Only withdrawals from PRIOR calendar years restore room
+    in_app_prior_withdrawals = 0.0
+    current_year = date.today().year
+    if withdrawals_df is not None and not withdrawals_df.empty:
+        wmask = withdrawals_df["account"] == "TFSA"
+        if person:
+            wmask &= withdrawals_df["person"] == person
+        wmask &= withdrawals_df["date"].dt.year < current_year
+        in_app_prior_withdrawals = float(withdrawals_df[wmask]["amount"].sum())
+
+    return (total_room
+            - prior_contributions
+            - in_app_contributions
+            + prior_withdrawals
+            + in_app_prior_withdrawals)
 
 
 def fhsa_cumulative_room(open_year: int, as_of_year: Optional[int] = None) -> float:

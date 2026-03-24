@@ -11,8 +11,8 @@ from datetime import date
 import uuid
 
 from utils.constants import (
-    SHEET_CONTRIBUTIONS, SHEET_RETURNS, SHEET_SNAPSHOTS, SHEET_SETTINGS,
-    CONTRIBUTIONS_COLS, RETURNS_COLS, SNAPSHOTS_COLS, SETTINGS_COLS,
+    SHEET_CONTRIBUTIONS, SHEET_RETURNS, SHEET_SNAPSHOTS, SHEET_WITHDRAWALS, SHEET_SETTINGS,
+    CONTRIBUTIONS_COLS, RETURNS_COLS, SNAPSHOTS_COLS, WITHDRAWALS_COLS, SETTINGS_COLS,
     DEFAULT_SETTINGS,
 )
 
@@ -70,6 +70,7 @@ def init_sheets():
     get_or_create_worksheet(ss, SHEET_CONTRIBUTIONS, CONTRIBUTIONS_COLS)
     get_or_create_worksheet(ss, SHEET_RETURNS,       RETURNS_COLS)
     get_or_create_worksheet(ss, SHEET_SNAPSHOTS,     SNAPSHOTS_COLS)
+    get_or_create_worksheet(ss, SHEET_WITHDRAWALS,   WITHDRAWALS_COLS)
     ws_settings = get_or_create_worksheet(ss, SHEET_SETTINGS, SETTINGS_COLS)
 
     # Write defaults for any missing setting keys
@@ -209,9 +210,56 @@ def add_snapshot(snapshot_date: date, account: str, person: str,
     st.cache_data.clear()
 
 
+def add_snapshots_bulk(rows: list[dict]):
+    """Write many snapshots in a single API call. Each dict: date, account, person, balance, source, notes."""
+    if not rows:
+        return
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_SNAPSHOTS, SNAPSHOTS_COLS)
+    data = [
+        [str(uuid.uuid4())[:8], str(r["date"]), r["account"], r["person"],
+         r["balance"], r.get("source", ""), r.get("notes", "")]
+        for r in rows
+    ]
+    ws.append_rows(data)
+    st.cache_data.clear()
+
+
 def delete_snapshot(row_id: str):
     ss = get_spreadsheet()
     ws = get_or_create_worksheet(ss, SHEET_SNAPSHOTS, SNAPSHOTS_COLS)
+    cell = ws.find(row_id)
+    if cell:
+        ws.delete_rows(cell.row)
+    st.cache_data.clear()
+
+
+# ─── Withdrawals ─────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=30)
+def get_withdrawals() -> pd.DataFrame:
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_WITHDRAWALS, WITHDRAWALS_COLS)
+    df = _read_df(ws)
+    if df.empty:
+        return pd.DataFrame(columns=WITHDRAWALS_COLS)
+    df["date"]   = pd.to_datetime(df["date"])
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def add_withdrawal(withdrawal_date: date, amount: float, account: str,
+                   person: str, notes: str = ""):
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_WITHDRAWALS, WITHDRAWALS_COLS)
+    row_id = str(uuid.uuid4())[:8]
+    ws.append_row([row_id, str(withdrawal_date), amount, account, person, notes])
+    st.cache_data.clear()
+
+
+def delete_withdrawal(row_id: str):
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_WITHDRAWALS, WITHDRAWALS_COLS)
     cell = ws.find(row_id)
     if cell:
         ws.delete_rows(cell.row)

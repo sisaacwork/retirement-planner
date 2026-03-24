@@ -37,12 +37,14 @@ PEOPLE = ["Isaac", "Katherine"]
 SHEET_CONTRIBUTIONS = "contributions"
 SHEET_RETURNS       = "returns"
 SHEET_SNAPSHOTS     = "balance_snapshots"
+SHEET_WITHDRAWALS   = "withdrawals"
 SHEET_SETTINGS      = "settings"
 
 # Column headers for each sheet
 CONTRIBUTIONS_COLS = ["id", "date", "amount", "account", "person", "notes"]
 RETURNS_COLS       = ["id", "date", "amount", "account", "person", "notes"]
 SNAPSHOTS_COLS     = ["id", "date", "account", "person", "balance", "source", "notes"]
+WITHDRAWALS_COLS   = ["id", "date", "amount", "account", "person", "notes"]
 SETTINGS_COLS      = ["key", "value"]
 
 # Default settings written on first run
@@ -56,6 +58,8 @@ DEFAULT_SETTINGS = {
     "rrsp_room_katherine":                 "0",
     "tfsa_prior_contributions_isaac":      "0",
     "tfsa_prior_contributions_katherine":  "0",
+    "tfsa_prior_withdrawals_isaac":        "0",
+    "tfsa_prior_withdrawals_katherine":    "0",
     "tfsa_eligible_year_isaac":            "2025",
     "tfsa_eligible_year_katherine":        "2026",
     "fhsa_prior_contributions_isaac":      "0",

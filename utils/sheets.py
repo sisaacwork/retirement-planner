@@ -234,7 +234,7 @@ def delete_snapshot(row_id: str):
     st.cache_data.clear()
 
 
-# ─── Withdrawals ─────────────────────────────────────────────────────────────
+# ─── Withdrawals ──────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=30)
 def get_withdrawals() -> pd.DataFrame:

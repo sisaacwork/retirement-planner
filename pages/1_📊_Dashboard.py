@@ -198,26 +198,126 @@ with col_b:
 
 st.divider()
 
-# ─── Returns analysis ────────────────────────────────────────────────────────
+# ─── Weekly return rate ────────────────────────────────────────────────────────
 
-st.subheader("Daily Returns Log")
-if not f_returns.empty:
-    ret_monthly = (
-        f_returns.copy()
-        .assign(month=lambda x: x["date"].dt.to_period("M").astype(str))
-        .groupby("month")["amount"]
-        .sum()
-        .reset_index()
-    )
-    ret_monthly["colour"] = ret_monthly["amount"].apply(lambda x: "Positive" if x >= 0 else "Negative")
-    fig5 = px.bar(ret_monthly, x="month", y="amount", color="colour",
-                  color_discrete_map={"Positive": "#4CAF50", "Negative": "#F44336"},
-                  labels={"month": "Month", "amount": "Net Return (CA$)", "colour": ""})
-    fig5.update_layout(yaxis_tickprefix="$", yaxis_tickformat=",.0f",
-                       margin=dict(l=0, r=0, t=10, b=0))
-    st.plotly_chart(fig5, use_container_width=True)
+st.subheader("Weekly Return Rate")
+st.caption(
+    "Week-over-week investment return with contributions and withdrawals factored out — "
+    "shows pure market performance without the noise of large deposits or withdrawals."
+)
+
+if not full_history.empty and len(full_history) >= 14:
+    _hw = full_history.copy()
+    _hw["week"] = _hw["date"].dt.to_period("W")
+    _w_end   = _hw.groupby("week")["balance"].last()
+    _w_start = _hw.groupby("week")["balance"].first()
+
+    _cw_dict = {}
+    if not f_contribs.empty:
+        _cwf = f_contribs.copy()
+        _cwf["week"] = _cwf["date"].dt.to_period("W")
+        _cw_dict = _cwf.groupby("week")["amount"].sum().to_dict()
+
+    _ww_dict = {}
+    if not f_withdrawals.empty:
+        _wwf = f_withdrawals.copy()
+        _wwf["week"] = _wwf["date"].dt.to_period("W")
+        _ww_dict = _wwf.groupby("week")["amount"].sum().to_dict()
+
+    _week_rows = []
+    for _wk in sorted(_w_end.index):
+        _sb = _w_start[_wk]
+        if _sb <= 0:
+            continue
+        _ret_pct = (_w_end[_wk] - _sb - _cw_dict.get(_wk, 0) + _ww_dict.get(_wk, 0)) / _sb * 100
+        # Skip weeks with implausibly large swings (usually the very first week
+        # when the starting balance is near zero, making % return meaningless)
+        if abs(_ret_pct) > 15:
+            continue
+        _week_rows.append({"Week": _wk.start_time, "Return (%)": round(_ret_pct, 3)})
+
+    if _week_rows:
+        _wk_df = pd.DataFrame(_week_rows)
+        _wk_df["4-week avg"] = _wk_df["Return (%)"].rolling(4, min_periods=1).mean()
+
+        fig_w = go.Figure()
+        fig_w.add_bar(
+            x=_wk_df["Week"], y=_wk_df["Return (%)"],
+            name="Weekly Return",
+            marker_color=["#4CAF50" if v >= 0 else "#F44336" for v in _wk_df["Return (%)"]],
+        )
+        fig_w.add_scatter(
+            x=_wk_df["Week"], y=_wk_df["4-week avg"],
+            mode="lines", name="4-week avg",
+            line=dict(color="#2196F3", width=2),
+        )
+        fig_w.add_hline(y=0, line_color="gray", line_width=1)
+        fig_w.update_layout(
+            yaxis_ticksuffix="%", yaxis_title="Weekly Return (%)", xaxis_title="Week",
+            margin=dict(l=0, r=0, t=10, b=0),
+            legend=dict(orientation="h", y=1.05),
+        )
+        st.plotly_chart(fig_w, use_container_width=True)
+    else:
+        st.caption("Not enough weekly data yet — add more balance snapshots over time.")
 else:
-    st.caption("No return entries yet.")
+    st.caption("At least two weeks of balance history needed for this chart.")
+
+st.divider()
+
+# ─── Returns analysis ─────────────────────────────────────────────────────────
+
+st.subheader(f"Monthly Returns ({_year_label})")
+st.caption(
+    "Derived from balance snapshots — contributions and withdrawals are factored out "
+    "so only investment gains and losses remain. This is accurate even if older entries "
+    "in your returns log pre-date the withdrawal correction fix."
+)
+
+# Derive monthly returns from balance history rather than logged return entries.
+_hist_for_returns = history if not history.empty else pd.DataFrame()
+
+if not _hist_for_returns.empty:
+    _h = _hist_for_returns.copy()
+    _h["month"] = _h["date"].dt.to_period("M")
+    _monthly_end   = _h.groupby("month")["balance"].last()
+    _monthly_start = _h.groupby("month")["balance"].first()
+
+    _c_monthly = {}
+    if not f_contribs_yr.empty:
+        _cm = f_contribs_yr.copy()
+        _cm["month"] = _cm["date"].dt.to_period("M")
+        _c_monthly = _cm.groupby("month")["amount"].sum().to_dict()
+
+    _w_monthly = {}
+    if not f_withdrawals_yr.empty:
+        _wm = f_withdrawals_yr.copy()
+        _wm["month"] = _wm["date"].dt.to_period("M")
+        _w_monthly = _wm.groupby("month")["amount"].sum().to_dict()
+
+    _ret_rows = []
+    for _mo in sorted(_monthly_end.index):
+        _ret_amt = (
+            _monthly_end[_mo]
+            - _monthly_start[_mo]
+            - _c_monthly.get(_mo, 0)
+            + _w_monthly.get(_mo, 0)
+        )
+        _ret_rows.append({"month": str(_mo), "amount": _ret_amt})
+
+    if _ret_rows:
+        _ret_df = pd.DataFrame(_ret_rows)
+        _ret_df["colour"] = _ret_df["amount"].apply(lambda x: "Positive" if x >= 0 else "Negative")
+        fig5 = px.bar(_ret_df, x="month", y="amount", color="colour",
+                      color_discrete_map={"Positive": "#4CAF50", "Negative": "#F44336"},
+                      labels={"month": "Month", "amount": "Net Return (CA$)", "colour": ""})
+        fig5.update_layout(yaxis_tickprefix="$", yaxis_tickformat=",.0f",
+                           margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(fig5, use_container_width=True)
+    else:
+        st.caption("Not enough balance data to derive returns yet.")
+else:
+    st.caption("No balance history available yet — add balance snapshots in Log Returns.")
 
 st.divider()
 

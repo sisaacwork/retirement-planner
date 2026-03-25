@@ -36,6 +36,7 @@ st.divider()
 
 RRSP_ANNUAL_MAX = 32490   # 2026 CRA RRSP deduction limit
 TFSA_FUTURE_LIMIT = 7000  # Assumed annual limit for years beyond known schedule
+_today_year = date.today().year
 
 # OAS 2026 quarterly-indexed rates
 OAS_FULL_MONTHLY_65_74  = 727.67   # age 65–74 (full pension, 40 qualifying years)
@@ -481,7 +482,6 @@ st.caption(
     "and how long your portfolio lasts."
 )
 
-_today_year = date.today().year
 ret_c1, ret_c2 = st.columns(2)
 with ret_c1:
     retirement_year = st.number_input(

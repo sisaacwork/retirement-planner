@@ -90,6 +90,9 @@ else:
 f_balance_df = current_balance_by_account(f_contribs, f_returns, f_snapshots, f_withdrawals)
 f_portfolio  = total_balance(f_balance_df)
 
+# Full portfolio history (needed for start-of-year balance lookup)
+full_history = portfolio_over_time(f_contribs, f_returns, f_snapshots, f_withdrawals)
+
 # ─── KPI row ──────────────────────────────────────────────────────────────────
 
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -103,20 +106,40 @@ with c2:
     else:
         st.metric("MWRR (Annualised)", "—")
 _year_label = year_filter if year_filter != "All time" else "All Time"
+
+total_contributions_all = float(f_contribs["amount"].sum()) if not f_contribs.empty else 0.0
+total_withdrawals_all   = float(f_withdrawals["amount"].sum()) if not f_withdrawals.empty else 0.0
+net_invested = total_contributions_all - total_withdrawals_all
+market_gain  = f_portfolio - net_invested
+
 with c3:
     total_contributions = float(f_contribs_yr["amount"].sum()) if not f_contribs_yr.empty else 0.0
     st.metric(f"Contributed ({_year_label})", f"${total_contributions:,.2f}")
 with c4:
-    total_returns = float(f_returns_yr["amount"].sum()) if not f_returns_yr.empty else 0.0
-    sign = "+" if total_returns >= 0 else ""
-    st.metric(f"Returns ({_year_label})", f"{sign}${total_returns:,.2f}")
+    # Compute returns from balance history, not from the logged returns table.
+    # This is accurate even if old return entries were saved without withdrawal correction.
+    # Formula: end_balance - start_balance - contributions_in_period + withdrawals_in_period
+    if year_filter != "All time":
+        _yr = int(year_filter)
+        year_start_ts = pd.Timestamp(f"{_yr}-01-01")
+        if not full_history.empty:
+            prior = full_history[full_history["date"] < year_start_ts]
+            start_balance = float(prior.iloc[-1]["balance"]) if not prior.empty else 0.0
+        else:
+            start_balance = 0.0
+        total_withdrawals_yr = float(f_withdrawals_yr["amount"].sum()) if not f_withdrawals_yr.empty else 0.0
+        period_returns = f_portfolio - start_balance - total_contributions + total_withdrawals_yr
+    else:
+        period_returns = market_gain
+
+    sign = "+" if period_returns >= 0 else ""
+    st.metric(
+        f"Returns ({_year_label})",
+        f"{sign}${period_returns:,.2f}",
+        help="Computed as: end balance − start balance − contributions + withdrawals. "
+             "This reflects pure investment performance, independent of logged return entries.",
+    )
 with c5:
-    # Market gain = balance - net invested (contributions minus withdrawals).
-    # Always uses all-time data since balance is cumulative.
-    total_contributions_all = float(f_contribs["amount"].sum()) if not f_contribs.empty else 0.0
-    total_withdrawals_all   = float(f_withdrawals["amount"].sum()) if not f_withdrawals.empty else 0.0
-    net_invested = total_contributions_all - total_withdrawals_all
-    market_gain  = f_portfolio - net_invested
     pct = (market_gain / net_invested * 100) if net_invested > 0 else 0
     st.metric("Market Gain (All Time)", f"${market_gain:,.2f}", delta=f"{pct:.1f}%")
 

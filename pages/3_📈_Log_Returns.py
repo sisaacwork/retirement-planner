@@ -10,9 +10,9 @@ import pandas as pd
 from datetime import date, timedelta
 
 from utils.sheets import (
-    get_contributions, get_returns, get_snapshots,
+    get_contributions, get_returns, get_snapshots, get_withdrawals,
     add_return, add_returns_bulk, delete_return,
-    add_snapshot, add_returns_bulk,
+    add_snapshot, add_snapshots_bulk,
     delete_snapshot,
 )
 from utils.calculations import (
@@ -33,6 +33,7 @@ st.divider()
 
 contributions = get_contributions()
 snapshots     = get_snapshots()
+withdrawals   = get_withdrawals()
 returns       = get_returns()
 
 tab_balance, tab_bulk, tab_manual, tab_history = st.tabs([
@@ -79,6 +80,7 @@ with tab_balance:
             person        = bal_person,
             contributions = contributions,
             snapshots     = snapshots,
+            withdrawals   = withdrawals,
         )
 
         st.divider()
@@ -120,6 +122,7 @@ with tab_balance:
                 person        = bal_person,
                 contributions = contributions,
                 snapshots     = snapshots,
+                withdrawals   = withdrawals,
             )
 
             # Always save the snapshot
@@ -229,10 +232,10 @@ with tab_bulk:
                         person             = bulk_person,
                         contributions      = contributions,
                         existing_snapshots = snapshots,
+                        withdrawals        = withdrawals,
                     )
 
                     # Save all snapshots in one call
-                    from utils.sheets import add_snapshots_bulk
                     snap_rows = [
                         {"date": r["date"], "account": bulk_account, "person": bulk_person,
                          "balance": r["balance"], "source": bulk_source,

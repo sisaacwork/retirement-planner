@@ -37,6 +37,26 @@ st.divider()
 RRSP_ANNUAL_MAX = 32490   # 2026 CRA RRSP deduction limit
 TFSA_FUTURE_LIMIT = 7000  # Assumed annual limit for years beyond known schedule
 
+# OAS 2026 quarterly-indexed rates
+OAS_FULL_MONTHLY_65_74  = 727.67   # age 65–74 (full pension, 40 qualifying years)
+OAS_FULL_MONTHLY_75PLUS = 800.44   # age 75+  (automatic 10% top-up since Jul 2022)
+OAS_DEFERRAL_BONUS      = 0.006    # 0.6 % per month deferred past 65, max age 70
+
+
+def calc_oas_monthly(residency_years: float, start_age: int) -> float:
+    """
+    Estimate monthly OAS based on Canadian residency and chosen start age.
+
+    Proration rule: full pension requires 40 years of residency after age 18.
+    Deferral bonus:  0.6 % per month deferred past 65 (max 36 % at age 70).
+    The 75+ top-up is applied automatically once the person turns 75.
+    We return the age-65-to-74 amount here; the 75+ bump is handled in the sim.
+    """
+    proration       = min(residency_years / 40.0, 1.0)
+    deferral_months = max(0, (min(start_age, 70) - 65) * 12)
+    deferral_factor = 1.0 + OAS_DEFERRAL_BONUS * deferral_months
+    return OAS_FULL_MONTHLY_65_74 * proration * deferral_factor
+
 # ─── Load data ────────────────────────────────────────────────────────────────
 
 contributions = get_contributions()
@@ -184,7 +204,152 @@ st.caption(
 
 st.divider()
 
-# ─── Section 3: Current room snapshot ────────────────────────────────────────
+# ─── Section 3: Government Benefits ──────────────────────────────────────────
+
+st.subheader("🏛️ Government Benefits (OAS / CPP / Social Security)")
+st.caption(
+    "When these benefits begin, the monthly income is added to your portfolio each month — "
+    "effectively reducing how much you need to draw down from savings. "
+    "Enter your **own estimates** from Service Canada and SSA.gov, as actual amounts depend "
+    "on your full contribution history."
+)
+
+with st.expander("ℹ️ Notes on US Social Security & the Canada-US Totalization Agreement", expanded=False):
+    st.markdown("""
+**Totalization Agreement (Canada–US)**
+Canada and the US have a Social Security Totalization Agreement. If you've worked in both countries,
+periods of contribution can be *combined* to meet minimum eligibility requirements for each country's
+benefit — but the payout from each country is still calculated only from that country's own contributions.
+This means you can receive **both CPP and US Social Security** simultaneously.
+
+**Windfall Elimination Provision (WEP) — no longer applies**
+The WEP historically reduced US Social Security benefits for people who also received a pension
+from non-SS-covered work (like CPP). The **Social Security Fairness Act**, signed into law in
+January 2025, **eliminated WEP**, so your full SS benefit is payable alongside CPP.
+
+**Getting your estimates**
+- CPP: Log in to [My Service Canada Account](https://www.canada.ca/en/employment-social-development/services/my-account.html) → "Canada Pension Plan" → Statement of Contributions
+- US SS: Visit [ssa.gov/myaccount](https://www.ssa.gov/myaccount/) to see your Social Security Statement
+""")
+
+# USD → CAD conversion for Social Security
+usd_cad = st.number_input(
+    "USD → CAD exchange rate",
+    min_value=1.0, max_value=2.0, value=1.38, step=0.01, format="%.2f",
+    help="Used to convert US Social Security amounts to CA$. Adjust to reflect your assumption.",
+)
+
+st.markdown("---")
+
+gov_cols = st.columns(2)
+gov_benefits = {}   # {person: [{"start_year", "monthly_cad", "label", "age_75_bump"}, ...]}
+
+for col, person, birth_yr in zip(gov_cols,
+                                  ["Isaac", "Katherine"],
+                                  [isaac_birth, katherine_birth]):
+    with col:
+        st.markdown(f"**👤 {person}** (born {birth_yr})")
+
+        # ── OAS ──
+        st.markdown("🇨🇦 **OAS (Old Age Security)**")
+        oas_residency = st.number_input(
+            f"Canadian residency years at OAS start age",
+            min_value=0, max_value=40, value=10,
+            key=f"oas_res_{person}",
+            help="Years you'll have lived in Canada after turning 18, by the time OAS starts. "
+                 "Full pension requires 40 years; partial = (years / 40) × full rate.",
+        )
+        oas_age = st.selectbox(
+            "OAS start age",
+            options=[65, 66, 67, 68, 69, 70],
+            index=0,
+            key=f"oas_age_{person}",
+            help="You can defer OAS past 65 for a 0.6%/month bonus (max +36% at 70).",
+        )
+        oas_start_year = birth_yr + oas_age
+        oas_monthly    = calc_oas_monthly(oas_residency, oas_age)
+        oas_75_start   = birth_yr + 75  # year the automatic 75+ top-up kicks in
+        oas_75_bump    = (OAS_FULL_MONTHLY_75PLUS - OAS_FULL_MONTHLY_65_74) * min(oas_residency / 40.0, 1.0)
+        st.caption(
+            f"Estimated OAS: **${oas_monthly:,.0f}/mo** starting {oas_start_year}"
+            + (f" · +${oas_75_bump:,.0f}/mo top-up at 75 ({oas_75_start})" if oas_residency > 0 else "")
+        )
+
+        # ── CPP ──
+        st.markdown("🇨🇦 **CPP (Canada Pension Plan)**")
+        cpp_monthly = st.number_input(
+            "Expected CPP (CA$/mo)",
+            min_value=0.0, step=50.0, format="%.0f", value=0.0,
+            key=f"cpp_mo_{person}",
+            help="Get your personalised estimate at My Service Canada Account → CPP Statement of Contributions.",
+        )
+        cpp_age = st.selectbox(
+            "CPP start age",
+            options=list(range(60, 71)),
+            index=5,   # default 65
+            key=f"cpp_age_{person}",
+            help="Taking CPP before 65 reduces it 0.6%/mo; after 65 increases it 0.7%/mo (max age 70).",
+        )
+        cpp_start_year = birth_yr + cpp_age
+        if cpp_monthly > 0:
+            st.caption(f"CPP: **${cpp_monthly:,.0f}/mo** starting {cpp_start_year}")
+
+        # ── US Social Security ──
+        st.markdown("🇺🇸 **US Social Security**")
+        ss_monthly_usd = st.number_input(
+            "Expected SS benefit (USD/mo)",
+            min_value=0.0, step=50.0, format="%.0f", value=0.0,
+            key=f"ss_mo_{person}",
+            help="Find your estimate at ssa.gov/myaccount. WEP was eliminated in Jan 2025, so "
+                 "your full SS benefit is payable alongside CPP.",
+        )
+        ss_age = st.selectbox(
+            "SS start age",
+            options=list(range(62, 71)),
+            index=3,   # default 65
+            key=f"ss_age_{person}",
+            help="Full Retirement Age (FRA) is 67 for those born after 1960. "
+                 "Taking SS at 62 reduces the benefit; at 70 it's maximised.",
+        )
+        ss_start_year  = birth_yr + ss_age
+        ss_monthly_cad = ss_monthly_usd * usd_cad
+        if ss_monthly_usd > 0:
+            st.caption(
+                f"SS: **${ss_monthly_usd:,.0f} USD/mo** (≈ ${ss_monthly_cad:,.0f} CA$) "
+                f"starting {ss_start_year}"
+            )
+
+        # Build the benefits list for this person
+        benefits_list = []
+        if oas_monthly > 0:
+            benefits_list.append({
+                "start_year": oas_start_year,
+                "monthly_cad": oas_monthly,
+                "label": "OAS",
+                "age_75_year": oas_75_start,
+                "age_75_bump_cad": oas_75_bump,
+            })
+        if cpp_monthly > 0:
+            benefits_list.append({
+                "start_year": cpp_start_year,
+                "monthly_cad": cpp_monthly,
+                "label": "CPP",
+                "age_75_year": None,
+                "age_75_bump_cad": 0.0,
+            })
+        if ss_monthly_cad > 0:
+            benefits_list.append({
+                "start_year": ss_start_year,
+                "monthly_cad": ss_monthly_cad,
+                "label": "US SS",
+                "age_75_year": None,
+                "age_75_bump_cad": 0.0,
+            })
+        gov_benefits[person] = benefits_list
+
+st.divider()
+
+# ─── Section 4: Current room snapshot ────────────────────────────────────────
 
 st.subheader("🏦 Current Contribution Room")
 st.caption("Remaining room as of today, based on your logged contributions and settings.")
@@ -221,34 +386,46 @@ if total_monthly == 0 and expected_return == 0:
 # ── Simulation ────────────────────────────────────────────────────────────────
 
 def run_projection(current_balances, current_room, monthly_contributions,
-                   fhsa_lifetime_used, salaries, annual_return_rate, years=40):
-    monthly_rate = annual_return_rate / 12
-    balances     = dict(current_balances)
-    room         = {k: v for k, v in current_room.items()}
-    fhsa_life    = dict(fhsa_lifetime_used)
-    today_year   = date.today().year
+                   fhsa_lifetime_used, salaries, annual_return_rate,
+                   gov_benefits=None, years=40):
+    """
+    Month-by-month portfolio projection.
+
+    gov_benefits: dict of {person: [{"start_year", "monthly_cad", "label",
+                                      "age_75_year", "age_75_bump_cad"}, ...]}
+    Government benefit income is added to a virtual "(person, Benefits)" bucket
+    each month once the benefit's start_year is reached — effectively modelling
+    the income as supplementing (or replacing) portfolio withdrawals.
+    The 75+ OAS top-up is applied automatically once age_75_year is hit.
+    """
+    monthly_rate   = annual_return_rate / 12
+    balances       = dict(current_balances)
+    room           = {k: v for k, v in current_room.items()}
+    fhsa_life      = dict(fhsa_lifetime_used)
+    today_year     = date.today().year
+    gov_benefits   = gov_benefits or {}
 
     # Ensure all contribution keys exist in balances
     for key in monthly_contributions:
         if key not in balances:
             balances[key] = 0.0
 
-    results = []
+    results        = []
     milestone_hits = {}   # milestone value → year first hit
+    benefit_starts = {}   # label → year benefit first appeared in notes
 
     for yr_offset in range(1, years + 1):
         cal_year    = today_year + yr_offset
         yr_contribs = {k: 0.0 for k in monthly_contributions}
-        yr_capped   = []   # accounts where room ran out this year
+        yr_capped   = []
+        yr_benefits = []   # benefit labels that begin this year
 
         # ── January 1: refresh annual room ────────────────────────────────────
-        # TFSA: new annual limit
         for person in PEOPLE:
             key = (person, "TFSA")
             annual_tfsa = TFSA_ANNUAL_LIMITS.get(cal_year, TFSA_FUTURE_LIMIT)
             room[key] = room.get(key, 0) + annual_tfsa
 
-        # FHSA: $8k/year until lifetime cap
         for person in PEOPLE:
             key = (person, "FHSA")
             used = fhsa_life.get(person, 0)
@@ -256,7 +433,6 @@ def run_projection(current_balances, current_room, monthly_contributions,
                 new_fhsa = min(FHSA_ANNUAL_LIMIT, FHSA_LIFETIME_LIMIT - used)
                 room[key] = room.get(key, 0) + new_fhsa
 
-        # RRSP: 18% of prior year salary, capped at annual max
         for person, salary in salaries.items():
             if salary > 0:
                 key = (person, "RRSP")
@@ -265,6 +441,7 @@ def run_projection(current_balances, current_room, monthly_contributions,
 
         # ── Run 12 months ──────────────────────────────────────────────────────
         for _ in range(12):
+            # Regular contributions
             for key, monthly_amt in monthly_contributions.items():
                 if monthly_amt <= 0:
                     continue
@@ -282,12 +459,24 @@ def run_projection(current_balances, current_room, monthly_contributions,
                 balances[key] = balances.get(key, 0.0) + actual
                 yr_contribs[key] = yr_contribs.get(key, 0.0) + actual
 
+            # Government benefit income
+            for person, benefits in gov_benefits.items():
+                for ben in benefits:
+                    if cal_year < ben["start_year"]:
+                        continue
+                    monthly_cad = ben["monthly_cad"]
+                    # Apply OAS 75+ top-up if applicable
+                    if ben.get("age_75_year") and cal_year >= ben["age_75_year"]:
+                        monthly_cad += ben.get("age_75_bump_cad", 0.0)
+                    ben_key = (person, "Benefits")
+                    balances[ben_key] = balances.get(ben_key, 0.0) + monthly_cad
+
             # Apply monthly return to all account balances
             for k in balances:
                 balances[k] = balances[k] * (1 + monthly_rate)
 
         # ── Year-end stats ─────────────────────────────────────────────────────
-        total_bal    = sum(balances.values())
+        total_bal     = sum(balances.values())
         total_contrib = sum(yr_contribs.values())
 
         # Track room-exhausted accounts
@@ -299,6 +488,20 @@ def run_projection(current_balances, current_room, monthly_contributions,
                     if label not in yr_capped:
                         yr_capped.append(label)
 
+        # Track first year each benefit starts (for table notes)
+        for person, benefits in gov_benefits.items():
+            for ben in benefits:
+                tag = f"{person} {ben['label']}"
+                if tag not in benefit_starts and cal_year >= ben["start_year"]:
+                    benefit_starts[tag] = cal_year
+                    yr_benefits.append(tag)
+                # OAS 75+ top-up flag
+                age75_tag = f"{person} OAS 75+ top-up"
+                if (ben.get("age_75_year") and age75_tag not in benefit_starts
+                        and cal_year >= ben["age_75_year"]):
+                    benefit_starts[age75_tag] = cal_year
+                    yr_benefits.append(age75_tag)
+
         # Track milestone hits
         for ms in milestones:
             if ms not in milestone_hits and total_bal >= ms:
@@ -309,10 +512,11 @@ def run_projection(current_balances, current_room, monthly_contributions,
             "total":       total_bal,
             "contributed": total_contrib,
             "capped":      yr_capped,
+            "benefits":    yr_benefits,
             "by_account":  {k: balances[k] for k in balances},
         })
 
-        # Stop projecting once well past all milestones and after at least 10 years
+        # Stop once well past all milestones (min 10 years)
         if milestones and total_bal > max(milestones) * 1.2 and yr_offset >= 10:
             break
 
@@ -325,6 +529,7 @@ projection, milestone_hits = run_projection(
     fhsa_lifetime_used    = fhsa_lifetime_used,
     salaries              = salaries,
     annual_return_rate    = expected_return / 100,
+    gov_benefits          = gov_benefits,
 )
 
 # ── Milestone summary ─────────────────────────────────────────────────────────
@@ -380,13 +585,14 @@ for r in projection:
         "Projected Balance":   f"${r['total']:,.0f}",
         "Contributed (Year)":  f"${r['contributed']:,.0f}",
     }
-    # Flag years where any account hits its cap
     flags = []
     for ms in milestones:
         if milestone_hits.get(ms) == r["year"]:
             flags.append(f"🎯 Hit ${ms:,.0f}")
     for label in r["capped"]:
         flags.append(f"🏁 {label} room full")
+    for label in r.get("benefits", []):
+        flags.append(f"🏛️ {label} begins")
     row["Notes"] = " · ".join(flags) if flags else ""
     table_rows.append(row)
 
@@ -394,21 +600,62 @@ st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True
 
 st.divider()
 
+# ── Retirement income summary ──────────────────────────────────────────────────
+
+any_benefits = any(len(v) > 0 for v in gov_benefits.values())
+if any_benefits:
+    st.subheader("🏛️ Projected Government Benefit Income")
+    st.caption(
+        "Monthly income from OAS, CPP, and US Social Security once all benefits are in payment. "
+        "At age 75, OAS automatically increases by ~10%. Amounts are in today's dollars (not inflation-adjusted)."
+    )
+
+    inc_rows = []
+    for person, benefits in gov_benefits.items():
+        for ben in benefits:
+            age_at_start = ben["start_year"] - ([isaac_birth, katherine_birth][PEOPLE.index(person)])
+            row = {
+                "Person":       person,
+                "Benefit":      ben["label"],
+                "Starts":       str(ben["start_year"]),
+                "Age at Start": str(age_at_start),
+                "Monthly (CA$)": f"${ben['monthly_cad']:,.0f}",
+            }
+            if ben.get("age_75_year") and ben.get("age_75_bump_cad", 0) > 0:
+                row["Notes"] = f"+${ben['age_75_bump_cad']:,.0f}/mo top-up at age 75 ({ben['age_75_year']})"
+            else:
+                row["Notes"] = ""
+            inc_rows.append(row)
+
+    if inc_rows:
+        st.dataframe(pd.DataFrame(inc_rows), use_container_width=True, hide_index=True)
+
+    # Total combined monthly income per person once all benefits are in payment
+    st.markdown("**Combined monthly income once all benefits are active:**")
+    for person, benefits in gov_benefits.items():
+        if benefits:
+            total_mo = sum(b["monthly_cad"] for b in benefits)
+            latest   = max(b["start_year"] for b in benefits)
+            st.caption(f"{person}: **${total_mo:,.0f}/mo CA$** (all benefits active from {latest})")
+
+st.divider()
+
 # ── Per-account balance breakdown ─────────────────────────────────────────────
 
 st.subheader("💼 End-of-Projection Balance by Account")
 if projection:
-    final = projection[-1]["by_account"]
+    final       = projection[-1]["by_account"]
     final_total = sum(final.values())
-    acct_rows = []
+    acct_rows   = []
+    all_accts   = ACCOUNT_TYPES + ["Benefits"]
     for person in PEOPLE:
-        for acct in ACCOUNT_TYPES:
+        for acct in all_accts:
             bal = final.get((person, acct), 0.0)
             if bal > 0:
                 acct_rows.append({
-                    "Person":  person,
-                    "Account": acct,
-                    "Balance": f"${bal:,.0f}",
+                    "Person":     person,
+                    "Account":    acct,
+                    "Balance":    f"${bal:,.0f}",
                     "% of Total": f"{bal/final_total*100:.1f}%" if final_total > 0 else "—",
                 })
     if acct_rows:

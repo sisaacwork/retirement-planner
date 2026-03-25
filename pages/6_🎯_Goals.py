@@ -114,7 +114,10 @@ def estimate_ss_monthly_usd(birth_year: int, ss_start_age: int,
     if us_work_years == 0:
         return 0.0
 
-    salary_usd = salary_cad / max(usd_cad_rate, 0.01)
+    # Fall back to 65% of YMPE (roughly median income) if no salary entered,
+    # matching the same assumption used by the CPP estimator.
+    effective_salary_cad = salary_cad if salary_cad > 0 else YMPE_2026 * 0.65
+    salary_usd = effective_salary_cad / max(usd_cad_rate, 0.01)
     # SS averages over 35 years; gaps count as $0
     aime = salary_usd * us_work_years / 35 / 12
 

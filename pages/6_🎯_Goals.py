@@ -681,7 +681,7 @@ def run_projection(current_balances, current_room, monthly_contributions,
         # Track milestone hits (accumulation only)
         if not retired:
             for ms in milestones:
-                if ms not in milestone_hits and total_bal >= ms:
+                if ms not in milestone_hits and savings_total_yr >= ms:
                     milestone_hits[ms] = cal_year
 
         # Monthly income in retirement = what the portfolio covers + govt benefits.
@@ -702,7 +702,7 @@ def run_projection(current_balances, current_room, monthly_contributions,
         })
 
         # Stop once well past all milestones (accumulation) OR 35 years post-retirement
-        if not retired and milestones and total_bal > max(milestones) * 1.2 and yr_offset >= 10:
+        if not retired and milestones and savings_total_yr > max(milestones) * 1.2 and yr_offset >= 10:
             if retirement_year is None:
                 break
         if retired and yr_offset >= (retirement_year - today_year + 35 if retirement_year else years):

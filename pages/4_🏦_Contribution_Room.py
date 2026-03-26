@@ -99,6 +99,21 @@ for person, birth_year, tfsa_eligible, fhsa_open, rrsp_room, tfsa_prior, tfsa_pr
     )
     tfsa_used      = tfsa_total - tfsa_remaining
 
+    # ── DEBUG (temporary) ─────────────────────────────────────────────────────
+    with st.expander(f"🔍 Debug: {person} TFSA raw data"):
+        _debug_mask = contributions["account"] == "TFSA"
+        _debug_mask &= contributions["person"] == person
+        _debug_rows = contributions[_debug_mask]
+        st.write(f"**Rows matching account=TFSA, person={person!r}:** {len(_debug_rows)}")
+        st.write(f"**Sum of those rows:** ${_debug_rows['amount'].sum():,.2f}")
+        st.write(f"**prior_contributions (from Settings):** ${tfsa_prior:,.2f}")
+        st.write(f"**tfsa_total (room):** ${tfsa_total:,.2f}")
+        st.write(f"**tfsa_remaining:** ${tfsa_remaining:,.2f}")
+        st.write(f"**tfsa_used:** ${tfsa_used:,.2f}")
+        st.write("**All TFSA rows in sheet (unfiltered by person):**")
+        st.dataframe(contributions[contributions["account"] == "TFSA"][["date","amount","account","person","notes"]], use_container_width=True)
+    # ── END DEBUG ──────────────────────────────────────────────────────────────
+
     # ── FHSA ──────────────────────────────────────────────────────────────────
     fhsa_accumulated = fhsa_cumulative_room(fhsa_open)   # room earned so far
     fhsa_remaining   = fhsa_remaining_room(fhsa_open, contributions, fhsa_prior, person=person)

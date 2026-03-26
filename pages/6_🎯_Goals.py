@@ -574,8 +574,11 @@ def run_projection(current_balances, current_room, monthly_contributions,
         # ── Transition to retirement at the start of the year ─────────────────
         if retirement_year and not retired and cal_year >= retirement_year:
             retired            = True
-            retirement_balance = sum(balances.values())
+            retirement_balance = sum(balances.values())   # portfolio only (no Benefits bucket)
             monthly_withdrawal = retirement_balance * annual_withdrawal_rate / 12
+            # monthly_withdrawal is the target total income from the portfolio.
+            # Government benefits will offset this — so the actual portfolio draw
+            # each month is max(0, monthly_withdrawal - monthly_benefit_income).
 
         # ── January 1: refresh annual room (accumulation only) ────────────────
         if not retired:
@@ -598,7 +601,21 @@ def run_projection(current_balances, current_room, monthly_contributions,
                     room[key] = room.get(key, 0) + new_rrsp
 
         # ── Run 12 months ──────────────────────────────────────────────────────
+        yr_benefit_income = 0.0   # total benefit income received this year
+
         for _ in range(12):
+            # Calculate benefit income this month (same formula both phases)
+            monthly_benefit_income = 0.0
+            for person, benefits in gov_benefits.items():
+                for ben in benefits:
+                    if cal_year < ben["start_year"]:
+                        continue
+                    mo_ben = ben["monthly_cad"]
+                    if ben.get("age_75_year") and cal_year >= ben["age_75_year"]:
+                        mo_ben += ben.get("age_75_bump_cad", 0.0)
+                    monthly_benefit_income += mo_ben
+            yr_benefit_income += monthly_benefit_income
+
             if not retired:
                 # Regular contributions
                 for key, monthly_amt in monthly_contributions.items():
@@ -616,37 +633,25 @@ def run_projection(current_balances, current_room, monthly_contributions,
                     balances[key] = balances.get(key, 0.0) + actual
                     yr_contribs[key] = yr_contribs.get(key, 0.0) + actual
             else:
-                # Portfolio withdrawal — distributed proportionally across all buckets
-                # (exclude the Benefits bucket — that's income, not savings)
-                savings_keys  = [k for k in balances if k[1] != "Benefits"]
-                savings_total = sum(balances[k] for k in savings_keys)
-                if savings_total > 0 and monthly_withdrawal > 0:
-                    actual_draw = min(monthly_withdrawal, savings_total)
-                    for k in savings_keys:
+                # Benefit income offsets the withdrawal — you spend it, not invest it.
+                # Only the shortfall (if any) is drawn from the portfolio.
+                net_draw      = max(0.0, monthly_withdrawal - monthly_benefit_income)
+                savings_total = sum(balances.values())
+                if savings_total > 0 and net_draw > 0:
+                    actual_draw = min(net_draw, savings_total)
+                    for k in list(balances.keys()):
                         share = balances[k] / savings_total
                         balances[k] = max(0.0, balances[k] - actual_draw * share)
 
-            # Government benefit income (both phases)
-            for person, benefits in gov_benefits.items():
-                for ben in benefits:
-                    if cal_year < ben["start_year"]:
-                        continue
-                    monthly_cad = ben["monthly_cad"]
-                    if ben.get("age_75_year") and cal_year >= ben["age_75_year"]:
-                        monthly_cad += ben.get("age_75_bump_cad", 0.0)
-                    ben_key = (person, "Benefits")
-                    balances[ben_key] = balances.get(ben_key, 0.0) + monthly_cad
-
-            # Apply monthly return to all balances
+            # Apply monthly return to portfolio balances only
             for k in balances:
                 balances[k] = balances[k] * (1 + monthly_rate)
 
         # ── Year-end stats ─────────────────────────────────────────────────────
-        savings_total_yr = sum(v for k, v in balances.items() if k[1] != "Benefits")
-        total_bal        = sum(balances.values())
+        savings_total_yr = sum(balances.values())   # no Benefits bucket to exclude
         total_contrib    = sum(yr_contribs.values())
 
-        # Record portfolio depletion (savings only, not benefits bucket)
+        # Record portfolio depletion
         if retired and depleted_year is None and savings_total_yr <= 0:
             depleted_year = cal_year
 
@@ -679,15 +684,21 @@ def run_projection(current_balances, current_room, monthly_contributions,
                 if ms not in milestone_hits and total_bal >= ms:
                     milestone_hits[ms] = cal_year
 
+        # Monthly income in retirement = what the portfolio covers + govt benefits.
+        # During accumulation this is 0 (no withdrawals being made).
+        yr_monthly_income = (monthly_withdrawal + yr_benefit_income / 12) if retired else 0.0
+
         results.append({
-            "year":        cal_year,
-            "total":       total_bal,
-            "savings":     savings_total_yr,
-            "contributed": total_contrib,
-            "capped":      yr_capped,
-            "benefits":    yr_benefits,
-            "retired":     retired,
-            "by_account":  {k: balances[k] for k in balances},
+            "year":              cal_year,
+            "total":             savings_total_yr,   # portfolio savings only
+            "savings":           savings_total_yr,
+            "contributed":       total_contrib,
+            "capped":            yr_capped,
+            "benefits":          yr_benefits,
+            "retired":           retired,
+            "monthly_income":    yr_monthly_income,  # portfolio draw + govt benefits/mo
+            "monthly_benefit":   yr_benefit_income / 12,
+            "by_account":        {k: balances[k] for k in balances},
         })
 
         # Stop once well past all milestones (accumulation) OR 35 years post-retirement
@@ -746,7 +757,7 @@ chart_rows = []
 for r in projection:
     chart_rows.append({
         "Year":    r["year"],
-        "Balance": r["total"],
+        "Balance": r["savings"],   # portfolio only — benefits no longer inflate this
         "Phase":   "Retirement" if r["retired"] else "Accumulation",
     })
 chart_df = pd.DataFrame(chart_rows)
@@ -793,15 +804,16 @@ table_rows = []
 _ret_yr_int = int(retirement_year)
 for r in projection:
     row = {
-        "Year":               str(r["year"]),
-        "Phase":              "🏖️ Retirement" if r["retired"] else "📈 Accumulation",
-        "Portfolio Balance":  f"${r['savings']:,.0f}",
-        "Total (incl. Govt)": f"${r['total']:,.0f}",
-        "Contributed":        f"${r['contributed']:,.0f}" if not r["retired"] else "—",
+        "Year":              str(r["year"]),
+        "Phase":             "🏖️ Retirement" if r["retired"] else "📈 Accumulation",
+        "Portfolio Balance": f"${r['savings']:,.0f}",
+        "Est. Monthly Income": f"${r['monthly_income']:,.0f}" if r["retired"] else "—",
+        "  Govt Benefits/mo":  f"${r['monthly_benefit']:,.0f}" if r["retired"] else "—",
+        "Contributed":       f"${r['contributed']:,.0f}" if not r["retired"] else "—",
     }
     flags = []
     if r["year"] == _ret_yr_int:
-        flags.append(f"🏖️ Retirement begins · ${retirement_info['monthly_withdrawal']:,.0f}/mo withdrawal")
+        flags.append(f"🏖️ Retirement begins · ${retirement_info['monthly_withdrawal']:,.0f}/mo portfolio draw")
     for ms in milestones:
         if milestone_hits.get(ms) == r["year"]:
             flags.append(f"🎯 Hit ${ms:,.0f}")
@@ -810,7 +822,7 @@ for r in projection:
     for label in r.get("benefits", []):
         flags.append(f"🏛️ {label} begins")
     if retirement_info["depleted_year"] == r["year"]:
-        flags.append("⚠️ Portfolio depleted")
+        flags.append("⚠️ Portfolio depleted — govt benefits continue")
     row["Notes"] = " · ".join(flags) if flags else ""
     table_rows.append(row)
 
@@ -949,7 +961,7 @@ if projection:
     final       = projection[-1]["by_account"]
     final_total = sum(final.values())
     acct_rows   = []
-    all_accts   = ACCOUNT_TYPES + ["Benefits"]
+    all_accts   = ACCOUNT_TYPES
     for person in PEOPLE:
         for acct in all_accts:
             bal = final.get((person, acct), 0.0)

@@ -341,28 +341,33 @@ def get_us_payslips() -> pd.DataFrame:
     df["date"]         = pd.to_datetime(df["date"])
     df["gross_usd"]    = pd.to_numeric(df["gross_usd"],    errors="coerce").fillna(0)
     df["il_tax_usd"]   = pd.to_numeric(df["il_tax_usd"],   errors="coerce").fillna(0)
+    # fed_tax_usd is optional — older rows won't have it
+    if "fed_tax_usd" in df.columns:
+        df["fed_tax_usd"] = pd.to_numeric(df["fed_tax_usd"], errors="coerce").fillna(0)
+    else:
+        df["fed_tax_usd"] = 0.0
     df["usd_cad_rate"] = pd.to_numeric(df["usd_cad_rate"], errors="coerce").fillna(0)
     return df.sort_values("date").reset_index(drop=True)
 
 
 def add_us_payslip(pay_date: date, gross_usd: float, il_tax_usd: float,
-                   usd_cad_rate: float, notes: str = ""):
+                   usd_cad_rate: float, notes: str = "", fed_tax_usd: float = 0.0):
     ss = get_spreadsheet()
     ws = get_or_create_worksheet(ss, SHEET_US_PAYSLIPS, US_PAYSLIPS_COLS)
     row_id = str(uuid.uuid4())[:8]
-    ws.append_row([row_id, str(pay_date), gross_usd, il_tax_usd, usd_cad_rate, notes])
+    ws.append_row([row_id, str(pay_date), gross_usd, il_tax_usd, fed_tax_usd, usd_cad_rate, notes])
     st.cache_data.clear()
 
 
 def add_us_payslips_bulk(rows: list[dict]):
-    """Write many payslips in a single API call. Each dict: date, gross_usd, il_tax_usd, usd_cad_rate, notes."""
+    """Write many payslips in a single API call. Each dict: date, gross_usd, il_tax_usd, fed_tax_usd, usd_cad_rate, notes."""
     if not rows:
         return
     ss = get_spreadsheet()
     ws = get_or_create_worksheet(ss, SHEET_US_PAYSLIPS, US_PAYSLIPS_COLS)
     data = [
         [str(uuid.uuid4())[:8], str(r["date"]), r["gross_usd"], r["il_tax_usd"],
-         r["usd_cad_rate"], r.get("notes", "")]
+         r.get("fed_tax_usd", 0.0), r["usd_cad_rate"], r.get("notes", "")]
         for r in rows
     ]
     ws.append_rows(data)

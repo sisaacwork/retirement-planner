@@ -48,7 +48,7 @@ RETURNS_COLS        = ["id", "date", "amount", "account", "person", "notes"]
 SNAPSHOTS_COLS      = ["id", "date", "account", "person", "balance", "source", "notes"]
 WITHDRAWALS_COLS    = ["id", "date", "amount", "account", "person", "notes"]
 SETTINGS_COLS       = ["key", "value"]
-US_PAYSLIPS_COLS    = ["id", "date", "gross_usd", "il_tax_usd", "usd_cad_rate", "notes"]
+US_PAYSLIPS_COLS    = ["id", "date", "gross_usd", "il_tax_usd", "fed_tax_usd", "usd_cad_rate", "notes"]
 US_INSTALMENTS_COLS = ["id", "date", "amount_cad", "quarter", "notes"]
 
 # Default settings written on first run

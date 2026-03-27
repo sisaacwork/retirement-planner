@@ -162,25 +162,30 @@ yr_payslips = payslips[payslips["date"].dt.year == selected_year].copy() if not 
 # ─── Summary metrics ──────────────────────────────────────────────────────────
 
 if not yr_payslips.empty:
-    total_gross_usd  = yr_payslips["gross_usd"].sum()
-    total_il_tax_usd = yr_payslips["il_tax_usd"].sum()
-    yr_payslips["gross_cad"]  = yr_payslips["gross_usd"]  * yr_payslips["usd_cad_rate"]
-    yr_payslips["il_tax_cad"] = yr_payslips["il_tax_usd"] * yr_payslips["usd_cad_rate"]
-    total_gross_cad  = yr_payslips["gross_cad"].sum()
-    total_il_tax_cad = yr_payslips["il_tax_cad"].sum()
-    avg_rate         = yr_payslips["usd_cad_rate"].mean()
+    total_gross_usd   = yr_payslips["gross_usd"].sum()
+    total_il_tax_usd  = yr_payslips["il_tax_usd"].sum()
+    total_fed_tax_usd = yr_payslips["fed_tax_usd"].sum()
+    yr_payslips["gross_cad"]    = yr_payslips["gross_usd"]    * yr_payslips["usd_cad_rate"]
+    yr_payslips["il_tax_cad"]   = yr_payslips["il_tax_usd"]   * yr_payslips["usd_cad_rate"]
+    yr_payslips["fed_tax_cad"]  = yr_payslips["fed_tax_usd"]  * yr_payslips["usd_cad_rate"]
+    total_gross_cad   = yr_payslips["gross_cad"].sum()
+    total_il_tax_cad  = yr_payslips["il_tax_cad"].sum()
+    total_fed_tax_cad = yr_payslips["fed_tax_cad"].sum()
+    avg_rate          = yr_payslips["usd_cad_rate"].mean()
     paycheques_logged = len(yr_payslips)
 else:
-    total_gross_usd = total_il_tax_usd = total_gross_cad = total_il_tax_cad = 0.0
+    total_gross_usd = total_il_tax_usd = total_fed_tax_usd = 0.0
+    total_gross_cad = total_il_tax_cad = total_fed_tax_cad = 0.0
     avg_rate = 0.0
     paycheques_logged = 0
 
 # Semi-monthly = 24 per year
 TOTAL_PAY_PERIODS = 24
 periods_remaining = max(0, TOTAL_PAY_PERIODS - paycheques_logged)
-annualized_gross_usd = (total_gross_usd / paycheques_logged * TOTAL_PAY_PERIODS) if paycheques_logged > 0 else 0.0
-annualized_gross_cad = (total_gross_cad / paycheques_logged * TOTAL_PAY_PERIODS) if paycheques_logged > 0 else 0.0
-annualized_il_tax_cad = (total_il_tax_cad / paycheques_logged * TOTAL_PAY_PERIODS) if paycheques_logged > 0 else 0.0
+annualized_gross_usd   = (total_gross_usd   / paycheques_logged * TOTAL_PAY_PERIODS) if paycheques_logged > 0 else 0.0
+annualized_gross_cad   = (total_gross_cad   / paycheques_logged * TOTAL_PAY_PERIODS) if paycheques_logged > 0 else 0.0
+annualized_il_tax_cad  = (total_il_tax_cad  / paycheques_logged * TOTAL_PAY_PERIODS) if paycheques_logged > 0 else 0.0
+annualized_fed_tax_cad = (total_fed_tax_cad / paycheques_logged * TOTAL_PAY_PERIODS) if paycheques_logged > 0 else 0.0
 
 # CPP (CPT20)
 cpp = calc_cpp_cpt20(annualized_gross_cad)
@@ -206,7 +211,7 @@ estimated_cra_owing = max(0.0, cpp["total"] - ftc["total_ftc"] - instalments_pai
 
 # ─── Top summary row ──────────────────────────────────────────────────────────
 
-m1, m2, m3, m4, m5 = st.columns(5)
+m1, m2, m3, m4, m5, m6 = st.columns(6)
 with m1:
     st.metric("Paycheques Logged", f"{paycheques_logged} / {TOTAL_PAY_PERIODS}")
 with m2:
@@ -216,6 +221,10 @@ with m3:
 with m4:
     st.metric("IL Tax Withheld (annualized CAD)", f"${annualized_il_tax_cad:,.0f}")
 with m5:
+    fed_label = f"${total_fed_tax_usd:,.2f} USD" if total_fed_tax_usd > 0 else "None withheld"
+    st.metric("US Federal Tax Withheld (YTD)", fed_label,
+              help="Any mistakenly withheld US federal tax — recoverable via a US 1040-NR filing.")
+with m6:
     st.metric("Est. Net CRA Owing", f"${estimated_cra_owing:,.0f}",
               help="CPP (CPT20) minus Foreign Tax Credit minus instalments paid")
 
@@ -242,47 +251,54 @@ with tab_log:
     with st.form("us_payslip_form", clear_on_submit=True):
         col1, col2, col3 = st.columns(3)
         with col1:
-            p_date = st.date_input("Pay Date", value=date.today())
+            p_date  = st.date_input("Pay Date", value=date.today())
             p_gross = st.number_input("Gross Pay (USD)", min_value=0.01, step=100.0, format="%.2f")
-        with col2:
-            p_il_tax = st.number_input(
-                "Illinois Tax Withheld (USD)",
-                min_value=0.0, step=10.0, format="%.2f",
-                help=f"Illinois flat rate is {IL_TAX_RATE*100:.2f}% of gross. "
-                     f"Auto-estimate: ${0:.2f} (enter gross first)"
-            )
-            p_rate = st.number_input(
+            p_rate  = st.number_input(
                 "USD→CAD Rate",
                 min_value=0.5, max_value=3.0, value=1.38, step=0.001, format="%.4f",
                 help="Bank of Canada daily rate on your pay date. Check bankofcanada.ca/rates/exchange/daily-exchange-rates/"
             )
+        with col2:
+            p_il_tax = st.number_input(
+                "Illinois Tax Withheld (USD)",
+                min_value=0.0, step=10.0, format="%.2f",
+                help=f"Illinois flat rate is {IL_TAX_RATE*100:.2f}% of gross."
+            )
+            p_fed_tax = st.number_input(
+                "US Federal Tax Withheld (USD)",
+                min_value=0.0, value=0.0, step=10.0, format="%.2f",
+                help="Leave at $0 if nothing was withheld — which is normal. "
+                     "If your employer accidentally withheld US federal tax, enter it here. "
+                     "You can recover it by filing a US 1040-NR."
+            )
         with col3:
             st.markdown("**Quick estimate**")
-            # These will be re-computed in the preview below the form
             st.caption("IL Tax estimate (4.95%):")
             st.info(f"**${p_gross * IL_TAX_RATE:,.2f} USD**")
             st.caption("Gross in CAD:")
             st.info(f"**${p_gross * p_rate:,.2f} CAD**")
+            if p_fed_tax > 0:
+                st.warning(f"⚠️ US federal withheld: **${p_fed_tax:,.2f}** — file 1040-NR to recover.")
 
         p_notes = st.text_input("Notes (optional)", placeholder="e.g. Period Jan 1–15")
 
         submitted = st.form_submit_button("➕ Add Paycheque", type="primary", use_container_width=True)
         if submitted:
-            add_us_payslip(p_date, p_gross, p_il_tax, p_rate, p_notes)
-            st.success(
-                f"✅ Logged ${p_gross:,.2f} USD (${p_gross * p_rate:,.2f} CAD) "
-                f"on {p_date} at {p_rate:.4f}."
-            )
+            add_us_payslip(p_date, p_gross, p_il_tax, p_rate, p_notes, fed_tax_usd=p_fed_tax)
+            msg = f"✅ Logged ${p_gross:,.2f} USD (${p_gross * p_rate:,.2f} CAD) on {p_date} at {p_rate:.4f}."
+            if p_fed_tax > 0:
+                msg += f" Note: ${p_fed_tax:,.2f} US federal tax logged — remember to file 1040-NR."
+            st.success(msg)
             st.rerun()
 
     # Paycheque history
     if not yr_payslips.empty:
         st.divider()
         st.subheader(f"Paycheque History — {selected_year}")
-        disp = yr_payslips[["date","gross_usd","il_tax_usd","usd_cad_rate","gross_cad","il_tax_cad","notes"]].copy()
+        disp = yr_payslips[["date","gross_usd","il_tax_usd","fed_tax_usd","usd_cad_rate","gross_cad","il_tax_cad","notes"]].copy()
         disp["date"] = disp["date"].dt.strftime("%Y-%m-%d")
-        disp.columns = ["Date","Gross USD","IL Tax USD","Rate","Gross CAD","IL Tax CAD","Notes"]
-        for col in ["Gross USD","IL Tax USD","Gross CAD","IL Tax CAD"]:
+        disp.columns = ["Date","Gross USD","IL Tax USD","US Fed Tax USD","Rate","Gross CAD","IL Tax CAD","Notes"]
+        for col in ["Gross USD","IL Tax USD","US Fed Tax USD","Gross CAD","IL Tax CAD"]:
             disp[col] = disp[col].apply(lambda x: f"${x:,.2f}")
         disp["Rate"] = disp["Rate"].apply(lambda x: f"{x:.4f}")
         st.dataframe(disp, use_container_width=True, hide_index=True)
@@ -322,11 +338,12 @@ with tab_bulk:
                                     help="You can override per-row in the table below.")
 
     template = pd.DataFrame({
-        "date":       [str(date.today())] * int(bulk_rows),
-        "gross_usd":  [0.0] * int(bulk_rows),
-        "il_tax_usd": [0.0] * int(bulk_rows),
+        "date":         [str(date.today())] * int(bulk_rows),
+        "gross_usd":    [0.0] * int(bulk_rows),
+        "il_tax_usd":   [0.0] * int(bulk_rows),
+        "fed_tax_usd":  [0.0] * int(bulk_rows),
         "usd_cad_rate": [float(bulk_rate)] * int(bulk_rows),
-        "notes":      [""] * int(bulk_rows),
+        "notes":        [""] * int(bulk_rows),
     })
 
     edited_bulk = st.data_editor(
@@ -337,6 +354,8 @@ with tab_bulk:
             "date":         st.column_config.TextColumn("Date (YYYY-MM-DD)"),
             "gross_usd":    st.column_config.NumberColumn("Gross USD", format="%.2f", step=0.01, min_value=0.0),
             "il_tax_usd":   st.column_config.NumberColumn("IL Tax USD", format="%.2f", step=0.01, min_value=0.0),
+            "fed_tax_usd":  st.column_config.NumberColumn("US Fed Tax USD", format="%.2f", step=0.01, min_value=0.0,
+                                                           help="Leave at $0 if nothing withheld — normal. Enter only if employer mistakenly withheld."),
             "usd_cad_rate": st.column_config.NumberColumn("USD/CAD Rate", format="%.4f", step=0.0001, min_value=0.5),
             "notes":        st.column_config.TextColumn("Notes"),
         },
@@ -348,12 +367,16 @@ with tab_bulk:
     non_zero_bulk["il_tax_usd"] = non_zero_bulk.apply(
         lambda r: r["gross_usd"] * IL_TAX_RATE if r["il_tax_usd"] == 0 else r["il_tax_usd"], axis=1
     )
-    st.caption(f"{len(non_zero_bulk)} rows with gross > $0 will be saved.")
+    fed_withheld_count = (non_zero_bulk["fed_tax_usd"] > 0).sum()
+    caption_txt = f"{len(non_zero_bulk)} rows with gross > $0 will be saved."
+    if fed_withheld_count > 0:
+        caption_txt += f" ⚠️ {fed_withheld_count} row(s) have US federal tax withheld — remember to file 1040-NR."
+    st.caption(caption_txt)
 
     if st.button("💾 Submit All Paycheques", type="primary", use_container_width=True):
         rows_to_save = [
             {"date": r["date"], "gross_usd": r["gross_usd"], "il_tax_usd": r["il_tax_usd"],
-             "usd_cad_rate": r["usd_cad_rate"], "notes": r["notes"]}
+             "fed_tax_usd": r["fed_tax_usd"], "usd_cad_rate": r["usd_cad_rate"], "notes": r["notes"]}
             for _, r in non_zero_bulk.iterrows()
         ]
         if rows_to_save:
@@ -383,6 +406,18 @@ with tab_tax:
         st.metric("Gross USD", f"${annualized_gross_usd:,.2f}")
         st.metric("Gross CAD", f"${annualized_gross_cad:,.2f}")
         st.metric("Illinois Tax Withheld (CAD)", f"${annualized_il_tax_cad:,.2f}")
+        if annualized_fed_tax_cad > 0:
+            st.metric(
+                "US Federal Tax Withheld (CAD)", f"${annualized_fed_tax_cad:,.2f}",
+                help="Mistakenly withheld — recoverable via US Form 1040-NR. "
+                     "This does NOT reduce your Canadian tax directly (use the FTC for that)."
+            )
+            st.warning(
+                f"⚠️ ${total_fed_tax_usd:,.2f} USD in US federal tax was withheld across "
+                f"{(yr_payslips['fed_tax_usd'] > 0).sum()} paycheque(s). "
+                "File a **US 1040-NR** to recover this amount.",
+                icon="⚠️"
+            )
         if paycheques_logged > 0:
             st.caption(
                 f"Avg USD/CAD rate: **{avg_rate:.4f}** | "

@@ -34,18 +34,22 @@ ACCOUNT_TYPES = ["TFSA", "FHSA", "RRSP", "NRSP"]
 PEOPLE = ["Isaac", "Katherine"]
 
 # Google Sheets tab names
-SHEET_CONTRIBUTIONS = "contributions"
-SHEET_RETURNS       = "returns"
-SHEET_SNAPSHOTS     = "balance_snapshots"
-SHEET_WITHDRAWALS   = "withdrawals"
-SHEET_SETTINGS      = "settings"
+SHEET_CONTRIBUTIONS  = "contributions"
+SHEET_RETURNS        = "returns"
+SHEET_SNAPSHOTS      = "balance_snapshots"
+SHEET_WITHDRAWALS    = "withdrawals"
+SHEET_SETTINGS       = "settings"
+SHEET_US_PAYSLIPS    = "us_payslips"       # Katherine's USD paycheques
+SHEET_US_INSTALMENTS = "us_instalments"   # CRA quarterly instalment payments
 
 # Column headers for each sheet
-CONTRIBUTIONS_COLS = ["id", "date", "amount", "account", "person", "notes"]
-RETURNS_COLS       = ["id", "date", "amount", "account", "person", "notes"]
-SNAPSHOTS_COLS     = ["id", "date", "account", "person", "balance", "source", "notes"]
-WITHDRAWALS_COLS   = ["id", "date", "amount", "account", "person", "notes"]
-SETTINGS_COLS      = ["key", "value"]
+CONTRIBUTIONS_COLS  = ["id", "date", "amount", "account", "person", "notes"]
+RETURNS_COLS        = ["id", "date", "amount", "account", "person", "notes"]
+SNAPSHOTS_COLS      = ["id", "date", "account", "person", "balance", "source", "notes"]
+WITHDRAWALS_COLS    = ["id", "date", "amount", "account", "person", "notes"]
+SETTINGS_COLS       = ["key", "value"]
+US_PAYSLIPS_COLS    = ["id", "date", "gross_usd", "il_tax_usd", "usd_cad_rate", "notes"]
+US_INSTALMENTS_COLS = ["id", "date", "amount_cad", "quarter", "notes"]
 
 # Default settings written on first run
 DEFAULT_SETTINGS = {

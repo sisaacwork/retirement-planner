@@ -12,7 +12,9 @@ import uuid
 
 from utils.constants import (
     SHEET_CONTRIBUTIONS, SHEET_RETURNS, SHEET_SNAPSHOTS, SHEET_WITHDRAWALS, SHEET_SETTINGS,
+    SHEET_US_PAYSLIPS, SHEET_US_INSTALMENTS,
     CONTRIBUTIONS_COLS, RETURNS_COLS, SNAPSHOTS_COLS, WITHDRAWALS_COLS, SETTINGS_COLS,
+    US_PAYSLIPS_COLS, US_INSTALMENTS_COLS,
     DEFAULT_SETTINGS,
 )
 
@@ -87,10 +89,12 @@ def get_or_create_worksheet(spreadsheet, title: str, headers: list[str]):
 def init_sheets():
     """Ensure all required worksheets exist; write default settings if needed."""
     ss = get_spreadsheet()
-    get_or_create_worksheet(ss, SHEET_CONTRIBUTIONS, CONTRIBUTIONS_COLS)
-    get_or_create_worksheet(ss, SHEET_RETURNS,       RETURNS_COLS)
-    get_or_create_worksheet(ss, SHEET_SNAPSHOTS,     SNAPSHOTS_COLS)
-    get_or_create_worksheet(ss, SHEET_WITHDRAWALS,   WITHDRAWALS_COLS)
+    get_or_create_worksheet(ss, SHEET_CONTRIBUTIONS,  CONTRIBUTIONS_COLS)
+    get_or_create_worksheet(ss, SHEET_RETURNS,        RETURNS_COLS)
+    get_or_create_worksheet(ss, SHEET_SNAPSHOTS,      SNAPSHOTS_COLS)
+    get_or_create_worksheet(ss, SHEET_WITHDRAWALS,    WITHDRAWALS_COLS)
+    get_or_create_worksheet(ss, SHEET_US_PAYSLIPS,    US_PAYSLIPS_COLS)
+    get_or_create_worksheet(ss, SHEET_US_INSTALMENTS, US_INSTALMENTS_COLS)
     ws_settings = get_or_create_worksheet(ss, SHEET_SETTINGS, SETTINGS_COLS)
 
     # Write defaults for any missing setting keys
@@ -323,3 +327,83 @@ def update_settings(updates: dict):
     """Batch-update multiple settings at once."""
     for key, value in updates.items():
         update_setting(key, value)
+
+
+# ─── US Payslips ──────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=300)
+def get_us_payslips() -> pd.DataFrame:
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_US_PAYSLIPS, US_PAYSLIPS_COLS)
+    df = _read_df(ws)
+    if df.empty:
+        return pd.DataFrame(columns=US_PAYSLIPS_COLS)
+    df["date"]         = pd.to_datetime(df["date"])
+    df["gross_usd"]    = pd.to_numeric(df["gross_usd"],    errors="coerce").fillna(0)
+    df["il_tax_usd"]   = pd.to_numeric(df["il_tax_usd"],   errors="coerce").fillna(0)
+    df["usd_cad_rate"] = pd.to_numeric(df["usd_cad_rate"], errors="coerce").fillna(0)
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def add_us_payslip(pay_date: date, gross_usd: float, il_tax_usd: float,
+                   usd_cad_rate: float, notes: str = ""):
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_US_PAYSLIPS, US_PAYSLIPS_COLS)
+    row_id = str(uuid.uuid4())[:8]
+    ws.append_row([row_id, str(pay_date), gross_usd, il_tax_usd, usd_cad_rate, notes])
+    st.cache_data.clear()
+
+
+def add_us_payslips_bulk(rows: list[dict]):
+    """Write many payslips in a single API call. Each dict: date, gross_usd, il_tax_usd, usd_cad_rate, notes."""
+    if not rows:
+        return
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_US_PAYSLIPS, US_PAYSLIPS_COLS)
+    data = [
+        [str(uuid.uuid4())[:8], str(r["date"]), r["gross_usd"], r["il_tax_usd"],
+         r["usd_cad_rate"], r.get("notes", "")]
+        for r in rows
+    ]
+    ws.append_rows(data)
+    st.cache_data.clear()
+
+
+def delete_us_payslip(row_id: str):
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_US_PAYSLIPS, US_PAYSLIPS_COLS)
+    cell = ws.find(row_id)
+    if cell:
+        ws.delete_rows(cell.row)
+    st.cache_data.clear()
+
+
+# ─── US CRA Instalments ───────────────────────────────────────────────────────
+
+@st.cache_data(ttl=300)
+def get_us_instalments() -> pd.DataFrame:
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_US_INSTALMENTS, US_INSTALMENTS_COLS)
+    df = _read_df(ws)
+    if df.empty:
+        return pd.DataFrame(columns=US_INSTALMENTS_COLS)
+    df["date"]       = pd.to_datetime(df["date"])
+    df["amount_cad"] = pd.to_numeric(df["amount_cad"], errors="coerce").fillna(0)
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def add_us_instalment(payment_date: date, amount_cad: float, quarter: str, notes: str = ""):
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_US_INSTALMENTS, US_INSTALMENTS_COLS)
+    row_id = str(uuid.uuid4())[:8]
+    ws.append_row([row_id, str(payment_date), amount_cad, quarter, notes])
+    st.cache_data.clear()
+
+
+def delete_us_instalment(row_id: str):
+    ss = get_spreadsheet()
+    ws = get_or_create_worksheet(ss, SHEET_US_INSTALMENTS, US_INSTALMENTS_COLS)
+    cell = ws.find(row_id)
+    if cell:
+        ws.delete_rows(cell.row)
+    st.cache_data.clear()
